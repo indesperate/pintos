@@ -69,10 +69,79 @@ pid_t process_execute(const char* file_name) {
   return tid;
 }
 
+/* A function get args number */
+static int get_args_num(char* args_str) {
+  if (!args_str) {
+    return 0;
+  }
+  int num = 0;
+  bool next_args = true;
+  for (size_t i = 0; i < strlen(args_str); i++) {
+    if (args_str[i] == ' ') {
+      next_args = true;
+    } else {
+      if (next_args) {
+        num++;
+        next_args = false;
+      }
+    }
+  }
+  return num;
+}
+
+/* A function to fill the stack with file name args */
+static void fill_stack_args(void** esp, char* file_name, char* saved_ptr) {
+  uint8_t* stack = *esp;
+  /* fill in the args in stack */
+  if (!saved_ptr) {
+    int args_len = strlen(saved_ptr);
+    stack -= args_len + 1;
+    strlcpy((char*)stack, saved_ptr, args_len + 1);
+    saved_ptr = (char*)stack;
+  }
+  /* fill in filename in stack */
+  int file_name_len = strlen(file_name);
+  stack -= file_name_len + 1;
+  strlcpy((char*)stack, file_name, file_name_len + 1);
+  file_name = (char*)stack;
+  /* one more for file name */
+  int args_num = get_args_num(saved_ptr) + 1;
+  /* calculate all bytes to align
+     argv[] one more for null-terminated argv
+     argc, argv
+   */
+  int args_bytes_len = (args_num + 1) * 4 + 4 + 4;
+  /* stack align */
+  stack -= args_bytes_len;
+  stack = (uint8_t*)((uint32_t)stack & ~15);
+  /* one more for return address*/
+  stack -= 4;
+  *esp = stack;
+  /* fill return and argv[n] */
+  memset(stack, 0, args_bytes_len + 4);
+  stack += 4;
+  /* fill argc argv */
+  *((uint32_t*)stack) = (uint32_t)args_num;
+  stack += sizeof(int);
+  *((uint32_t*)stack) = (uint32_t)(stack + 4);
+  stack += sizeof(char**);
+  /* fill argv[] */
+  *((uint32_t*)stack) = (uint32_t)file_name;
+  stack += sizeof(char*);
+  if (!saved_ptr) {
+    for (char* token = strtok_r(NULL, " ", &saved_ptr); token != NULL;
+         token = strtok_r(NULL, " ", &saved_ptr)) {
+      *((uint32_t*)stack) = (uint32_t)token;
+      stack += sizeof(char*);
+    }
+  }
+}
+
 /* A thread function that loads a user process and starts it
    running. */
 static void start_process(void* file_name_) {
-  char* file_name = (char*)file_name_;
+  char* saved_ptr;
+  char* file_name = strtok_r((char*)file_name_, " ", &saved_ptr);
   struct thread* t = thread_current();
   struct intr_frame if_;
   bool success, pcb_success;
@@ -100,6 +169,10 @@ static void start_process(void* file_name_) {
     if_.cs = SEL_UCSEG;
     if_.eflags = FLAG_IF | FLAG_MBS;
     success = load(file_name, &if_.eip, &if_.esp);
+  }
+
+  if (success) {
+    fill_stack_args(&if_.esp, file_name, saved_ptr);
   }
 
   /* Handle failure with succesful PCB malloc. Must free the PCB */
