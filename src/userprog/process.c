@@ -68,6 +68,8 @@ pid_t process_execute(const char* file_name) {
   sema_down(&child->sema_load);
   if (!child->loaded) {
     return TID_ERROR;
+    list_remove(&child->elem);
+    free(child);
   }
   palloc_free_page(fn_copy);
   return tid;
@@ -248,6 +250,8 @@ void process_exit(void) {
   struct thread* cur = thread_current();
   uint32_t* pd;
 
+  cur->child_ptr->exited = true;
+
   /* If this thread does not have a PCB, don't worry */
   if (cur->pcb == NULL) {
     thread_exit();
@@ -280,12 +284,15 @@ void process_exit(void) {
     free(f);
   }
 
-  /* free child state */
+  /* free  standalone child state */
   struct list* children = &thread_current()->children;
   for (e = list_begin(children); e != list_end(children);) {
     struct child_process* child = list_entry(e, struct child_process, elem);
     e = list_next(e);
-    free(child);
+    /* TODO: find a way to deal with zombie thread, runining but not waited */
+    if (child->exited && !child->wait_called) {
+      free(child);
+    }
   }
 
   /* Free the PCB of this process and kill this thread

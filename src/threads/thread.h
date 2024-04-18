@@ -119,6 +119,7 @@ struct child_process {
   struct semaphore sema_load; /* load status semaphore */
   tid_t pid;                  /* children pid */
   int exit_status;            /* exit status */
+  bool exited;                /* if exited */
   bool wait_called;           /* if already called wait*/
   bool loaded;                /* if load successful */
   struct list_elem elem;      /* list elem */
