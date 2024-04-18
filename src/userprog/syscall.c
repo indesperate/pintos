@@ -43,6 +43,15 @@ static bool check_and_read4(uint8_t* argc, const uint8_t* uaddr) {
       return false;
     }
     *argc = (uint8_t)result;
+  return true;
+}
+
+/* read 4 bytes */
+static bool check_and_read4(uint8_t* argc, const uint8_t* uaddr) {
+  for (int i = 0; i < 4; i++) {
+    if (!check_and_read(argc, uaddr)) {
+      return false;
+    }
     argc++;
     uaddr++;
   }
@@ -57,6 +66,13 @@ static void error_exit(struct intr_frame* f, int error_code) {
 
 static void check_read_or_exit(struct intr_frame* f, uint8_t* argc, uint8_t* uaddr) {
   if (!check_and_read4(argc, uaddr)) {
+    error_exit(f, -1);
+  }
+}
+
+static void check_or_exit(struct intr_frame* f, uint8_t* uaddr) {
+  int argc;
+  if (!check_and_read(&argc, uaddr)) {
     error_exit(f, -1);
   }
 }
@@ -93,6 +109,7 @@ static void sys_exec(struct intr_frame* f) {
   uint32_t* args = ((uint32_t*)f->esp);
   char* cmd_line;
   check_read_or_exit(f, (uint8_t*)&cmd_line, (uint8_t*)&args[1]);
+  check_or_exit(f, cmd_line);
   f->eax = process_execute(cmd_line);
 }
 static void sys_wait(struct intr_frame* f) {
