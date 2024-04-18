@@ -93,7 +93,7 @@ static int get_args_num(char* args_str) {
 static void fill_stack_args(void** esp, char* file_name, char* saved_ptr) {
   uint8_t* stack = *esp;
   /* fill in the args in stack */
-  if (!saved_ptr) {
+  if (saved_ptr) {
     int args_len = strlen(saved_ptr);
     stack -= args_len + 1;
     strlcpy((char*)stack, saved_ptr, args_len + 1);
@@ -128,7 +128,7 @@ static void fill_stack_args(void** esp, char* file_name, char* saved_ptr) {
   /* fill argv[] */
   *((uint32_t*)stack) = (uint32_t)file_name;
   stack += sizeof(char*);
-  if (!saved_ptr) {
+  if (saved_ptr) {
     for (char* token = strtok_r(NULL, " ", &saved_ptr); token != NULL;
          token = strtok_r(NULL, " ", &saved_ptr)) {
       *((uint32_t*)stack) = (uint32_t)token;
