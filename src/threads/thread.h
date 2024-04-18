@@ -100,11 +100,19 @@ struct thread {
   struct list children;            /* children list */
   struct thread* parent;           /* thread parent */
   struct child_process* child_ptr; /* child process pointer in parent */
+  /* file descriptor */
+  struct list fds; /* file descriptors list*/
 
 #endif
 
   /* Owned by thread.c. */
   unsigned magic; /* Detects stack overflow. */
+};
+
+struct file_descriptor {
+  int fd;
+  struct file* file;
+  struct list_elem elem;
 };
 
 struct child_process {

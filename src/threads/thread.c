@@ -446,6 +446,7 @@ static void init_thread(struct thread* t, const char* name, int priority) {
   list_init(&t->children);
   t->parent = NULL;
   t->child_ptr = NULL;
+  list_init(&t->fds);
 
   old_level = intr_disable();
   list_push_back(&all_list, &t->allelem);

@@ -7,10 +7,13 @@
 #include "threads/vaddr.h"
 #include "devices/shutdown.h"
 #include "filesys/filesys.h"
+#include "filesys/file.h"
+#include "threads/malloc.h"
+#include "devices/input.h"
 #include <string.h>
 
 #define SYS_CNT 32
-#define MAX_CONSOLE_BUF 256
+#define MAX_BUF 256
 
 typedef void syscall_handler_func(struct intr_frame*);
 
@@ -48,6 +51,13 @@ static bool check_and_read(uint8_t* argc, const uint8_t* uaddr) {
   return true;
 }
 
+static bool check_and_write(uint8_t argc, uint8_t* uaddr) {
+  if (!is_user_vaddr(uaddr) || !put_user(uaddr, argc)) {
+    return false;
+  }
+  return true;
+}
+
 /* read 4 bytes */
 static bool check_and_read4(uint8_t* argc, const uint8_t* uaddr) {
   for (int i = 0; i < 4; i++) {
@@ -80,6 +90,26 @@ static void check_str(struct intr_frame* f, uint8_t* uaddr) {
     }
     uaddr++;
   } while (c != '\0');
+}
+
+static void check_read_buffer(struct intr_frame* f, uint8_t* uaddr, size_t size) {
+  uint8_t c;
+  for (size_t i = 0; i < size; i++) {
+    if (!check_and_read(&c, uaddr)) {
+      error_exit(f, -1);
+    }
+    uaddr++;
+  }
+}
+
+static void check_write_buffer(struct intr_frame* f, uint8_t* uaddr, size_t size) {
+  uint8_t c = 'c';
+  for (size_t i = 0; i < size; i++) {
+    if (!check_and_write(c, uaddr)) {
+      error_exit(f, -1);
+    }
+    uaddr++;
+  }
 }
 
 static syscall_handler_func* syscall_handlers[SYS_CNT];
@@ -132,10 +162,116 @@ static void sys_create(struct intr_frame* f) {
   check_read_or_exit(f, (uint8_t*)&file, (uint8_t*)&args[1]);
   check_read_or_exit(f, (uint8_t*)&initial_size, (uint8_t*)&args[2]);
   check_str(f, (uint8_t*)file);
-  if (!file || !strcmp(file, "")) {
+  if (!strcmp(file, "")) {
     error_exit(f, -1);
   }
   f->eax = filesys_create(file, initial_size);
+}
+
+static void sys_remove(struct intr_frame* f) {
+  uint32_t* args = ((uint32_t*)f->esp);
+  const char* file;
+  check_read_or_exit(f, (uint8_t*)&file, (uint8_t*)&args[1]);
+  check_str(f, (uint8_t*)file);
+  if (!strcmp(file, "")) {
+    error_exit(f, -1);
+  }
+  f->eax = filesys_remove(file);
+}
+
+static void sys_open(struct intr_frame* f) {
+  uint32_t* args = ((uint32_t*)f->esp);
+  const char* file;
+  check_read_or_exit(f, (uint8_t*)&file, (uint8_t*)&args[1]);
+  check_str(f, (uint8_t*)file);
+  struct file* open_file = filesys_open(file);
+  if (!open_file) {
+    f->eax = -1;
+    return;
+  }
+  struct file_descriptor* fdp = malloc(sizeof(struct file_descriptor));
+  struct list* fds = &thread_current()->fds;
+  int fd = 2;
+  if (!list_empty(fds)) {
+    struct file_descriptor* end = list_entry(list_back(fds), struct file_descriptor, elem);
+    fd = end->fd + 1;
+  }
+  fdp->fd = fd;
+  fdp->file = open_file;
+  list_push_back(fds, &fdp->elem);
+  f->eax = fd;
+}
+
+static struct file_descriptor* find_fd(int fd) {
+  if (fd == STDIN_FILENO || fd == STDOUT_FILENO) {
+    return NULL;
+  }
+  struct list_elem* e;
+  struct list* fds = &thread_current()->fds;
+  for (e = list_begin(fds); e != list_end(fds); e = list_next(e)) {
+    struct file_descriptor* f = list_entry(e, struct file_descriptor, elem);
+    if (f->fd == fd) {
+      return f;
+    }
+  }
+  return NULL;
+}
+
+static void sys_filesize(struct intr_frame* f) {
+  uint32_t* args = ((uint32_t*)f->esp);
+  int fd;
+  check_read_or_exit(f, (uint8_t*)&fd, (uint8_t*)&args[1]);
+  struct file_descriptor* fdp = find_fd(fd);
+  if (!fdp) {
+    f->eax = -1;
+  }
+  f->eax = file_length(fdp->file);
+}
+
+static void sys_close(struct intr_frame* f) {
+  uint32_t* args = ((uint32_t*)f->esp);
+  int fd;
+  check_read_or_exit(f, (uint8_t*)&fd, (uint8_t*)&args[1]);
+  struct file_descriptor* fdp = find_fd(fd);
+  if (!fdp) {
+    error_exit(f, -1);
+  }
+  file_close(fdp->file);
+  list_remove(&fdp->elem);
+  free(fdp);
+}
+static void sys_read(struct intr_frame* f) {
+  uint32_t* args = ((uint32_t*)f->esp);
+  int fd;
+  void* buffer;
+  unsigned size;
+  check_read_or_exit(f, (uint8_t*)&fd, (uint8_t*)&args[1]);
+  check_read_or_exit(f, (uint8_t*)&buffer, (uint8_t*)&args[2]);
+  check_read_or_exit(f, (uint8_t*)&size, (uint8_t*)&args[3]);
+  check_write_buffer(f, buffer, size);
+  int num_read = 0;
+  if (fd == STDIN_FILENO) {
+    while (size > 1) {
+      *((uint8_t*)buffer) = input_getc();
+      buffer = (uint8_t*)buffer + 1;
+      num_read += 1;
+      size -= 1;
+    }
+    *((uint8_t*)buffer) = input_getc();
+    num_read += 1;
+  } else {
+    struct file_descriptor* fdp = find_fd(fd);
+    if (!fdp) {
+      error_exit(f, -1);
+    }
+    while (size > MAX_BUF) {
+      num_read += file_read(fdp->file, buffer, MAX_BUF);
+      size -= MAX_BUF;
+    }
+    num_read += file_read(fdp->file, buffer, size);
+  }
+  f->eax = num_read;
+  return;
 }
 
 static void sys_write(struct intr_frame* f) {
@@ -146,19 +282,54 @@ static void sys_write(struct intr_frame* f) {
   check_read_or_exit(f, (uint8_t*)&fd, (uint8_t*)&args[1]);
   check_read_or_exit(f, (uint8_t*)&buffer, (uint8_t*)&args[2]);
   check_read_or_exit(f, (uint8_t*)&size, (uint8_t*)&args[3]);
+  check_read_buffer(f, buffer, size);
   int num_writen = 0;
-  if (fd == 1) {
-    if (size > MAX_CONSOLE_BUF) {
-      putbuf(buffer, MAX_CONSOLE_BUF);
-      buffer = (uint8_t*)buffer + MAX_CONSOLE_BUF;
-      size -= MAX_CONSOLE_BUF;
-      num_writen += MAX_CONSOLE_BUF;
-    } else {
-      putbuf(buffer, size);
-      num_writen += size;
+  if (fd == STDOUT_FILENO) {
+    while (size > MAX_BUF) {
+      putbuf(buffer, MAX_BUF);
+      buffer = (uint8_t*)buffer + MAX_BUF;
+      num_writen += MAX_BUF;
+      size -= MAX_BUF;
     }
-    f->eax = num_writen;
+    putbuf(buffer, size);
+    num_writen += size;
+  } else {
+    struct file_descriptor* fdp = find_fd(fd);
+    if (!fdp) {
+      error_exit(f, -1);
+    }
+    while (size > MAX_BUF) {
+      num_writen += file_write(fdp->file, buffer, MAX_BUF);
+      size -= MAX_BUF;
+    }
+    num_writen += file_write(fdp->file, buffer, size);
   }
+  f->eax = num_writen;
+  return;
+}
+
+static void sys_seek(struct intr_frame* f) {
+  uint32_t* args = ((uint32_t*)f->esp);
+  int fd;
+  unsigned position;
+  check_read_or_exit(f, (uint8_t*)&fd, (uint8_t*)&args[1]);
+  check_read_or_exit(f, (uint8_t*)&position, (uint8_t*)&args[2]);
+  struct file_descriptor* fdp = find_fd(fd);
+  if (!fdp) {
+    error_exit(f, -1);
+  }
+  file_seek(fdp->file, position);
+}
+
+static void sys_tell(struct intr_frame* f) {
+  uint32_t* args = ((uint32_t*)f->esp);
+  int fd;
+  check_read_or_exit(f, (uint8_t*)&fd, (uint8_t*)&args[1]);
+  struct file_descriptor* fdp = find_fd(fd);
+  if (!fdp) {
+    error_exit(f, -1);
+  }
+  f->eax = file_tell(fdp->file);
 }
 
 void syscall_init(void) {
@@ -168,14 +339,14 @@ void syscall_init(void) {
   register_handler(SYS_EXEC, sys_exec);
   register_handler(SYS_WAIT, sys_wait);
   register_handler(SYS_CREATE, sys_create);
-  register_handler(SYS_REMOVE, dump);
-  register_handler(SYS_OPEN, dump);
-  register_handler(SYS_FILESIZE, dump);
-  register_handler(SYS_READ, dump);
+  register_handler(SYS_REMOVE, sys_remove);
+  register_handler(SYS_OPEN, sys_open);
+  register_handler(SYS_FILESIZE, sys_filesize);
+  register_handler(SYS_READ, sys_read);
   register_handler(SYS_WRITE, sys_write);
-  register_handler(SYS_SEEK, dump);
-  register_handler(SYS_TELL, dump);
-  register_handler(SYS_CLOSE, dump);
+  register_handler(SYS_SEEK, sys_seek);
+  register_handler(SYS_TELL, sys_tell);
+  register_handler(SYS_CLOSE, sys_close);
   register_handler(SYS_PRACTICE, sys_practice);
   register_handler(SYS_COMPUTE_E, dump);
   register_handler(SYS_PT_CREATE, dump);
