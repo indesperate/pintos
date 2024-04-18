@@ -95,7 +95,13 @@ struct thread {
 
 #ifdef USERPROG
   /* Owned by process.c. */
-  struct process* pcb; /* Process control block if this thread is a userprog */
+  struct process* pcb;         /* Process control block if this thread is a userprog */
+  struct list children;        /* children list */
+  struct list_elem child_elem; /* child elem*/
+  struct thread* parent;       /* thread parent */
+  int return_stauts;           /* return status */
+  bool waited;                 /* if thread alreay been waited */
+
 #endif
 
   /* Owned by thread.c. */

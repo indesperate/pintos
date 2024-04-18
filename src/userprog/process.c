@@ -202,6 +202,18 @@ static void start_process(void* file_name_) {
   NOT_REACHED();
 }
 
+static struct thread* find_child_process(pid_t child_pid) {
+  struct list_elem* e;
+  struct list* children = &thread_current()->children;
+  for (e = list_begin(children); e != list_end(children); e = list_next(e)) {
+    struct thread* f = list_entry(e, struct thread, child_elem);
+    if (f->tid == child_pid) {
+      return f;
+    }
+  }
+  return NULL;
+}
+
 /* Waits for process with PID child_pid to die and returns its exit status.
    If it was terminated by the kernel (i.e. killed due to an
    exception), returns -1.  If child_pid is invalid or if it was not a
@@ -211,9 +223,16 @@ static void start_process(void* file_name_) {
 
    This function will be implemented in problem 2-2.  For now, it
    does nothing. */
-int process_wait(pid_t child_pid UNUSED) {
+int process_wait(pid_t child_pid) {
+  struct thread* child = find_child_process(child_pid);
+  if (!child || child->waited) {
+    return -1;
+  }
+  child->waited = true;
+  list_remove(&child->child_elem);
   sema_down(&temporary);
-  return 0;
+  int state = child->return_stauts;
+  return state;
 }
 
 /* Free the current process's resources. */
