@@ -270,6 +270,16 @@ void process_exit(void) {
     pagedir_destroy(pd);
   }
 
+  /* free file descriptors */
+  struct list_elem* e;
+  struct list* fds = &thread_current()->fds;
+  for (e = list_begin(fds); e != list_end(fds);) {
+    struct file_descriptor* f = list_entry(e, struct file_descriptor, elem);
+    file_close(f->file);
+    e = list_next(e);
+    free(f);
+  }
+
   /* Free the PCB of this process and kill this thread
      Avoid race where PCB is freed before t->pcb is set to NULL
      If this happens, then an unfortuantely timed timer interrupt
