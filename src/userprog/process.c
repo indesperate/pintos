@@ -206,8 +206,8 @@ static struct thread* find_child_process(pid_t child_pid) {
   struct list_elem* e;
   struct list* children = &thread_current()->children;
   for (e = list_begin(children); e != list_end(children); e = list_next(e)) {
-    struct thread* f = list_entry(e, struct thread, child_elem);
-    if (f->tid == child_pid) {
+    struct child_process* f = list_entry(e, struct child_process, elem);
+    if (f->pid == child_pid) {
       return f;
     }
   }
@@ -224,14 +224,15 @@ static struct thread* find_child_process(pid_t child_pid) {
    This function will be implemented in problem 2-2.  For now, it
    does nothing. */
 int process_wait(pid_t child_pid) {
-  struct thread* child = find_child_process(child_pid);
-  if (!child || child->waited) {
+  struct child_process* child = find_child_process(child_pid);
+  if (!child || child->wait_called) {
     return -1;
   }
-  child->waited = true;
-  list_remove(&child->child_elem);
+  child->wait_called = true;
+  list_remove(&child->elem);
   sema_down(&temporary);
-  int state = child->return_stauts;
+  int state = child->exit_status;
+  palloc_free_page(child);
   return state;
 }
 

@@ -190,7 +190,6 @@ tid_t thread_create(const char* name, int priority, thread_func* function, void*
   /* Initialize thread. */
   init_thread(t, name, priority);
   t->parent = thread_current();
-  list_push_back(&thread_current()->children, &t->child_elem);
 
   tid = t->tid = allocate_tid();
 
@@ -211,6 +210,14 @@ tid_t thread_create(const char* name, int priority, thread_func* function, void*
 
   /* Add to run queue. */
   thread_unblock(t);
+
+  /* child_process for parent */
+  struct child_process* child = palloc_get_page(PAL_ZERO);
+  child->exit_status = 0;
+  child->pid = tid;
+  child->wait_called = false;
+  list_push_back(&thread_current()->children, &child->elem);
+  t->child_ptr = child;
 
   return tid;
 }
@@ -436,8 +443,7 @@ static void init_thread(struct thread* t, const char* name, int priority) {
   t->magic = THREAD_MAGIC;
   list_init(&t->children);
   t->parent = NULL;
-  t->waited = false;
-  t->return_stauts = -1;
+  t->child_ptr = NULL;
 
   old_level = intr_disable();
   list_push_back(&all_list, &t->allelem);
