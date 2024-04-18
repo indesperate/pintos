@@ -72,11 +72,14 @@ static void check_read_or_exit(struct intr_frame* f, uint8_t* argc, uint8_t* uad
   }
 }
 
-static void check_or_exit(struct intr_frame* f, uint8_t* uaddr) {
-  int argc;
-  if (!check_and_read(&argc, uaddr)) {
-    error_exit(f, -1);
-  }
+static void check_str(struct intr_frame* f, uint8_t* uaddr) {
+  char c = '\0';
+  do {
+    if (!check_and_read((uint8_t*)&c, uaddr)) {
+      error_exit(f, -1);
+    }
+    uaddr++;
+  } while (c != '\0');
 }
 
 static syscall_handler_func* syscall_handlers[SYS_CNT];
@@ -112,7 +115,7 @@ static void sys_exec(struct intr_frame* f) {
   uint32_t* args = ((uint32_t*)f->esp);
   const char* cmd_line;
   check_read_or_exit(f, (uint8_t*)&cmd_line, (uint8_t*)&args[1]);
-  check_or_exit(f, cmd_line);
+  check_str(f, (uint8_t*)cmd_line);
   f->eax = process_execute(cmd_line);
 }
 static void sys_wait(struct intr_frame* f) {
@@ -128,7 +131,7 @@ static void sys_create(struct intr_frame* f) {
   unsigned initial_size;
   check_read_or_exit(f, (uint8_t*)&file, (uint8_t*)&args[1]);
   check_read_or_exit(f, (uint8_t*)&initial_size, (uint8_t*)&args[2]);
-  check_or_exit(f, file);
+  check_str(f, (uint8_t*)file);
   if (!file || !strcmp(file, "")) {
     error_exit(f, -1);
   }
