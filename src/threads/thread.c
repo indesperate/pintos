@@ -209,7 +209,7 @@ tid_t thread_create(const char* name, int priority, thread_func* function, void*
   sf->ebp = 0;
 
   /* child_process for parent */
-  struct child_process* child = palloc_get_page(PAL_ZERO);
+  struct child_process* child = malloc(sizeof(struct child_process));
   child->exit_status = -1;
   child->pid = tid;
   child->wait_called = false;

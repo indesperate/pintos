@@ -239,7 +239,7 @@ int process_wait(pid_t child_pid) {
   list_remove(&child->elem);
   sema_down(&thread_current()->sema);
   int state = child->exit_status;
-  palloc_free_page(child);
+  free(child);
   return state;
 }
 
@@ -278,6 +278,14 @@ void process_exit(void) {
     file_close(f->file);
     e = list_next(e);
     free(f);
+  }
+
+  /* free child state */
+  struct list* children = &thread_current()->children;
+  for (e = list_begin(children); e != list_end(children);) {
+    struct child_process* child = list_entry(e, struct child_process, elem);
+    e = list_next(e);
+    free(child);
   }
 
   /* Free the PCB of this process and kill this thread
