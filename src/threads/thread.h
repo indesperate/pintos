@@ -108,10 +108,12 @@ struct thread {
 };
 
 struct child_process {
-  tid_t pid;             /* children pid */
-  int exit_status;       /* exit status */
-  bool wait_called;      /* if already called wait*/
-  struct list_elem elem; /* list elem */
+  struct semaphore sema_load; /* load status semaphore */
+  tid_t pid;                  /* children pid */
+  int exit_status;            /* exit status */
+  bool wait_called;           /* if already called wait*/
+  bool loaded;                /* if load successful */
+  struct list_elem elem;      /* list elem */
 };
 
 /* Types of scheduler that the user can request the kernel

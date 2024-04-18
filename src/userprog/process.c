@@ -23,6 +23,7 @@
 static thread_func start_process NO_RETURN;
 static thread_func start_pthread NO_RETURN;
 static bool load(const char* file_name, void (**eip)(void), void** esp);
+static struct child_process* find_child_process(pid_t child_pid);
 bool setup_thread(void (**eip)(void), void** esp);
 
 /* Initializes user programs in the system by ensuring the main
@@ -63,8 +64,12 @@ pid_t process_execute(const char* file_name) {
 
   /* Create a new thread to execute FILE_NAME. */
   tid = thread_create(file_name, PRI_DEFAULT, start_process, fn_copy);
-  if (tid == TID_ERROR)
-    palloc_free_page(fn_copy);
+  struct child_process* child = find_child_process(tid);
+  sema_down(&child->sema_load);
+  if (!child->loaded) {
+    return TID_ERROR;
+  }
+  palloc_free_page(fn_copy);
   return tid;
 }
 
@@ -182,10 +187,13 @@ static void start_process(void* file_name_) {
     struct process* pcb_to_free = t->pcb;
     t->pcb = NULL;
     free(pcb_to_free);
+  } else {
+    thread_current()->child_ptr->loaded = true;
   }
 
   /* Clean up. Exit on failure or jump to userspace */
-  palloc_free_page(file_name);
+  sema_up(&thread_current()->child_ptr->sema_load);
+
   if (!success) {
     sema_up(&thread_current()->parent->sema);
     thread_exit();

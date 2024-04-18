@@ -208,16 +208,18 @@ tid_t thread_create(const char* name, int priority, thread_func* function, void*
   sf->eip = switch_entry;
   sf->ebp = 0;
 
-  /* Add to run queue. */
-  thread_unblock(t);
-
   /* child_process for parent */
   struct child_process* child = palloc_get_page(PAL_ZERO);
-  child->exit_status = 0;
+  child->exit_status = -1;
   child->pid = tid;
   child->wait_called = false;
+  child->loaded = false;
+  sema_init(&child->sema_load, 0);
   list_push_back(&thread_current()->children, &child->elem);
   t->child_ptr = child;
+
+  /* Add to run queue. */
+  thread_unblock(t);
 
   return tid;
 }
