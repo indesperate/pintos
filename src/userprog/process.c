@@ -20,7 +20,6 @@
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 
-static struct semaphore temporary;
 static thread_func start_process NO_RETURN;
 static thread_func start_pthread NO_RETURN;
 static bool load(const char* file_name, void (**eip)(void), void** esp);
@@ -54,7 +53,7 @@ pid_t process_execute(const char* file_name) {
   char* fn_copy;
   tid_t tid;
 
-  sema_init(&temporary, 0);
+  sema_init(&thread_current()->sema, 0);
   /* Make a copy of FILE_NAME.
      Otherwise there's a race between the caller and load(). */
   fn_copy = palloc_get_page(0);
@@ -188,7 +187,7 @@ static void start_process(void* file_name_) {
   /* Clean up. Exit on failure or jump to userspace */
   palloc_free_page(file_name);
   if (!success) {
-    sema_up(&temporary);
+    sema_up(&thread_current()->parent->sema);
     thread_exit();
   }
 
@@ -202,7 +201,7 @@ static void start_process(void* file_name_) {
   NOT_REACHED();
 }
 
-static struct thread* find_child_process(pid_t child_pid) {
+static struct child_process* find_child_process(pid_t child_pid) {
   struct list_elem* e;
   struct list* children = &thread_current()->children;
   for (e = list_begin(children); e != list_end(children); e = list_next(e)) {
@@ -230,7 +229,7 @@ int process_wait(pid_t child_pid) {
   }
   child->wait_called = true;
   list_remove(&child->elem);
-  sema_down(&temporary);
+  sema_down(&thread_current()->sema);
   int state = child->exit_status;
   palloc_free_page(child);
   return state;
@@ -271,7 +270,7 @@ void process_exit(void) {
   cur->pcb = NULL;
   free(pcb_to_free);
 
-  sema_up(&temporary);
+  sema_up(&thread_current()->parent->sema);
   thread_exit();
 }
 

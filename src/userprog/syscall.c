@@ -6,8 +6,12 @@
 #include "userprog/process.h"
 #include "threads/vaddr.h"
 #include "devices/shutdown.h"
+#include "filesys/filesys.h"
+#include <string.h>
 
 #define SYS_CNT 32
+#define MAX_CONSOLE_BUF 256
+
 typedef void syscall_handler_func(struct intr_frame*);
 
 static void syscall_handler(struct intr_frame*);
@@ -32,17 +36,15 @@ UNUSED static bool put_user(uint8_t* udst, uint8_t byte) {
   return error_code != -1;
 }
 
-/* read 4 bytes */
-static bool check_and_read4(uint8_t* argc, const uint8_t* uaddr) {
-  for (int i = 0; i < 4; i++) {
-    if (!is_user_vaddr(uaddr)) {
-      return false;
-    }
-    int result = get_user(uaddr);
-    if (result == -1) {
-      return false;
-    }
-    *argc = (uint8_t)result;
+static bool check_and_read(uint8_t* argc, const uint8_t* uaddr) {
+  if (!is_user_vaddr(uaddr)) {
+    return false;
+  }
+  int result = get_user(uaddr);
+  if (result == -1) {
+    return false;
+  }
+  *argc = (uint8_t)result;
   return true;
 }
 
@@ -87,7 +89,8 @@ static void sys_exit(struct intr_frame* f) {
   int status;
   uint32_t* args = ((uint32_t*)f->esp);
   check_read_or_exit(f, (uint8_t*)&status, (uint8_t*)&args[1]);
-  thread_current()->return_stauts = status;
+  ASSERT(thread_current()->child_ptr != NULL);
+  thread_current()->child_ptr->exit_status = status;
   error_exit(f, status);
 }
 
@@ -107,7 +110,7 @@ static void sys_halt(struct intr_frame* f UNUSED) { shutdown_power_off(); }
 
 static void sys_exec(struct intr_frame* f) {
   uint32_t* args = ((uint32_t*)f->esp);
-  char* cmd_line;
+  const char* cmd_line;
   check_read_or_exit(f, (uint8_t*)&cmd_line, (uint8_t*)&args[1]);
   check_or_exit(f, cmd_line);
   f->eax = process_execute(cmd_line);
@@ -119,18 +122,54 @@ static void sys_wait(struct intr_frame* f) {
   f->eax = process_wait(pid);
 }
 
+static void sys_create(struct intr_frame* f) {
+  uint32_t* args = ((uint32_t*)f->esp);
+  const char* file;
+  unsigned initial_size;
+  check_read_or_exit(f, (uint8_t*)&file, (uint8_t*)&args[1]);
+  check_read_or_exit(f, (uint8_t*)&initial_size, (uint8_t*)&args[2]);
+  check_or_exit(f, file);
+  if (!file || !strcmp(file, "")) {
+    error_exit(f, -1);
+  }
+  f->eax = filesys_create(file, initial_size);
+}
+
+static void sys_write(struct intr_frame* f) {
+  uint32_t* args = ((uint32_t*)f->esp);
+  int fd;
+  void* buffer;
+  unsigned size;
+  check_read_or_exit(f, (uint8_t*)&fd, (uint8_t*)&args[1]);
+  check_read_or_exit(f, (uint8_t*)&buffer, (uint8_t*)&args[2]);
+  check_read_or_exit(f, (uint8_t*)&size, (uint8_t*)&args[3]);
+  int num_writen = 0;
+  if (fd == 1) {
+    if (size > MAX_CONSOLE_BUF) {
+      putbuf(buffer, MAX_CONSOLE_BUF);
+      buffer = (uint8_t*)buffer + MAX_CONSOLE_BUF;
+      size -= MAX_CONSOLE_BUF;
+      num_writen += MAX_CONSOLE_BUF;
+    } else {
+      putbuf(buffer, size);
+      num_writen += size;
+    }
+    f->eax = num_writen;
+  }
+}
+
 void syscall_init(void) {
   intr_register_int(0x30, 3, INTR_ON, syscall_handler, "syscall");
   register_handler(SYS_HALT, sys_halt);
   register_handler(SYS_EXIT, sys_exit);
   register_handler(SYS_EXEC, sys_exec);
   register_handler(SYS_WAIT, sys_wait);
-  register_handler(SYS_CREATE, dump);
+  register_handler(SYS_CREATE, sys_create);
   register_handler(SYS_REMOVE, dump);
   register_handler(SYS_OPEN, dump);
   register_handler(SYS_FILESIZE, dump);
   register_handler(SYS_READ, dump);
-  register_handler(SYS_WRITE, dump);
+  register_handler(SYS_WRITE, sys_write);
   register_handler(SYS_SEEK, dump);
   register_handler(SYS_TELL, dump);
   register_handler(SYS_CLOSE, dump);

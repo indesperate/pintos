@@ -95,6 +95,7 @@ struct thread {
 
 #ifdef USERPROG
   /* Owned by process.c. */
+  struct semaphore sema;           /* semaphore to trace child process*/
   struct process* pcb;             /* Process control block if this thread is a userprog */
   struct list children;            /* children list */
   struct thread* parent;           /* thread parent */
