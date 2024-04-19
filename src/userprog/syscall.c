@@ -10,6 +10,7 @@
 #include "filesys/file.h"
 #include "threads/malloc.h"
 #include "devices/input.h"
+#include <float.h>
 #include <string.h>
 
 #define SYS_CNT 32
@@ -332,6 +333,14 @@ static void sys_tell(struct intr_frame* f) {
   f->eax = file_tell(fdp->file);
 }
 
+/* floating point opeartions */
+static void sys_compute_e(struct intr_frame* f) {
+  uint32_t* args = ((uint32_t*)f->esp);
+  int n;
+  check_read_or_exit(f, (uint8_t*)&n, (uint8_t*)&args[1]);
+  f->eax = sys_sum_to_e(n);
+}
+
 void syscall_init(void) {
   intr_register_int(0x30, 3, INTR_ON, syscall_handler, "syscall");
   register_handler(SYS_HALT, sys_halt);
@@ -348,7 +357,7 @@ void syscall_init(void) {
   register_handler(SYS_TELL, sys_tell);
   register_handler(SYS_CLOSE, sys_close);
   register_handler(SYS_PRACTICE, sys_practice);
-  register_handler(SYS_COMPUTE_E, dump);
+  register_handler(SYS_COMPUTE_E, sys_compute_e);
   register_handler(SYS_PT_CREATE, dump);
   register_handler(SYS_PT_EXIT, dump);
   register_handler(SYS_PT_JOIN, dump);
