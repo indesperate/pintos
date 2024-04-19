@@ -11,6 +11,7 @@
 #include "threads/switch.h"
 #include "threads/synch.h"
 #include "threads/vaddr.h"
+#include "threads/malloc.h"
 #ifdef USERPROG
 #include "userprog/process.h"
 #endif
@@ -406,6 +407,9 @@ static void idle(void* idle_started_ UNUSED) {
 /* Function used as the basis for a kernel thread. */
 static void kernel_thread(thread_func* function, void* aux) {
   ASSERT(function != NULL);
+
+  /* init fpu */
+  asm volatile("fninit");
 
   intr_enable(); /* The scheduler runs with interrupts off. */
   function(aux); /* Execute the thread function. */

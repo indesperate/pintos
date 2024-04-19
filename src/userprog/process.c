@@ -171,6 +171,7 @@ static void start_process(void* file_name_) {
   /* Initialize interrupt frame and load executable. */
   if (success) {
     memset(&if_, 0, sizeof if_);
+    asm volatile("fninit; fsave (%0)" : : "g"(&if_.fpu_state));
     if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
     if_.cs = SEL_UCSEG;
     if_.eflags = FLAG_IF | FLAG_MBS;
@@ -414,7 +415,6 @@ bool load(const char* file_name, void (**eip)(void), void** esp) {
   /* this file close when process exit */
   t->exec_file = file = filesys_open(file_name);
   /*  prevent other process to write */
-  file_deny_write(file);
   if (file == NULL) {
     printf("load: %s: open failed\n", file_name);
     goto done;
