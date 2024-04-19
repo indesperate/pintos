@@ -97,26 +97,44 @@ static void check_str(struct intr_frame* f, uint8_t* uaddr) {
   } while (c != '\0');
 }
 
-/* check buffer can read */
+/* check buffer can read, only check begin, end and when buffer length over a page size */
 static void check_read_buffer(struct intr_frame* f, uint8_t* uaddr, size_t size) {
   uint8_t c;
-  for (size_t i = 0; i < size; i++) {
+  if (size > 0) {
     if (!check_and_read(&c, uaddr)) {
       error_exit(f, -1);
     }
-    uaddr++;
+    if (!check_and_read(&c, uaddr + size - 1)) {
+      error_exit(f, -1);
+    }
+    while (size > PGSIZE) {
+      uaddr += PGSIZE - 1;
+      if (!check_and_read(&c, uaddr)) {
+        error_exit(f, -1);
+      }
+      size -= PGSIZE;
+    }
   }
 }
 
-/* check buffer can write */
+/* check buffer can write, only check begin and end */
 static void check_write_buffer(struct intr_frame* f, uint8_t* uaddr, size_t size) {
   /* int 3(debug interrput x86 asm) assembly code is 0xcc */
-  uint8_t c = 0xcc;
-  for (size_t i = 0; i < size; i++) {
+  if (size > 0) {
+    uint8_t c = 0xcc;
     if (!check_and_write(c, uaddr)) {
       error_exit(f, -1);
     }
-    uaddr++;
+    if (!check_and_write(c, uaddr + size - 1)) {
+      error_exit(f, -1);
+    }
+    while (size > PGSIZE) {
+      uaddr += PGSIZE - 1;
+      if (!check_and_write(c, uaddr)) {
+        error_exit(f, -1);
+      }
+      size -= PGSIZE;
+    }
   }
 }
 
