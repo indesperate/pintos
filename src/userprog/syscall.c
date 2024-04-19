@@ -40,6 +40,7 @@ UNUSED static bool put_user(uint8_t* udst, uint8_t byte) {
   return error_code != -1;
 }
 
+/* check and read byte, error exit */
 static bool check_and_read(uint8_t* argc, const uint8_t* uaddr) {
   if (!is_user_vaddr(uaddr)) {
     return false;
@@ -52,6 +53,7 @@ static bool check_and_read(uint8_t* argc, const uint8_t* uaddr) {
   return true;
 }
 
+/* check and write one byte, error exit */
 static bool check_and_write(uint8_t argc, uint8_t* uaddr) {
   if (!is_user_vaddr(uaddr) || !put_user(uaddr, argc)) {
     return false;
@@ -77,12 +79,14 @@ static void error_exit(struct intr_frame* f, int error_code) {
   process_exit();
 }
 
+/* check and read 4 bytes to argc */
 static void check_read_or_exit(struct intr_frame* f, uint8_t* argc, uint8_t* uaddr) {
   if (!check_and_read4(argc, uaddr)) {
     error_exit(f, -1);
   }
 }
 
+/* check if a valid string */
 static void check_str(struct intr_frame* f, uint8_t* uaddr) {
   char c = '\0';
   do {
@@ -93,6 +97,7 @@ static void check_str(struct intr_frame* f, uint8_t* uaddr) {
   } while (c != '\0');
 }
 
+/* check buffer can read */
 static void check_read_buffer(struct intr_frame* f, uint8_t* uaddr, size_t size) {
   uint8_t c;
   for (size_t i = 0; i < size; i++) {
@@ -103,8 +108,10 @@ static void check_read_buffer(struct intr_frame* f, uint8_t* uaddr, size_t size)
   }
 }
 
+/* check buffer can write */
 static void check_write_buffer(struct intr_frame* f, uint8_t* uaddr, size_t size) {
-  uint8_t c = 'c';
+  /* int 3(debug interrput x86 asm) assembly code is 0xcc */
+  uint8_t c = 0xcc;
   for (size_t i = 0; i < size; i++) {
     if (!check_and_write(c, uaddr)) {
       error_exit(f, -1);
@@ -190,6 +197,7 @@ static void sys_open(struct intr_frame* f) {
     f->eax = -1;
     return;
   }
+  /* set fds */
   struct file_descriptor* fdp = malloc(sizeof(struct file_descriptor));
   struct list* fds = &thread_current()->fds;
   int fd = 2;
@@ -203,6 +211,7 @@ static void sys_open(struct intr_frame* f) {
   f->eax = fd;
 }
 
+/* find the fd -> file_descriptor in fds */
 static struct file_descriptor* find_fd(int fd) {
   if (fd == STDIN_FILENO || fd == STDOUT_FILENO) {
     return NULL;
@@ -262,9 +271,11 @@ static void sys_read(struct intr_frame* f) {
     num_read += 1;
   } else {
     struct file_descriptor* fdp = find_fd(fd);
+    /* check fd */
     if (!fdp) {
       error_exit(f, -1);
     }
+    /* buffer write */
     while (size > MAX_BUF) {
       num_read += file_read(fdp->file, buffer, MAX_BUF);
       size -= MAX_BUF;
@@ -286,6 +297,7 @@ static void sys_write(struct intr_frame* f) {
   check_read_buffer(f, buffer, size);
   int num_writen = 0;
   if (fd == STDOUT_FILENO) {
+    /* buffer write */
     while (size > MAX_BUF) {
       putbuf(buffer, MAX_BUF);
       buffer = (uint8_t*)buffer + MAX_BUF;
@@ -299,6 +311,7 @@ static void sys_write(struct intr_frame* f) {
     if (!fdp) {
       error_exit(f, -1);
     }
+    /* buffer write */
     while (size > MAX_BUF) {
       num_writen += file_write(fdp->file, buffer, MAX_BUF);
       size -= MAX_BUF;

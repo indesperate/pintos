@@ -66,6 +66,7 @@ pid_t process_execute(const char* file_name) {
   tid = thread_create(file_name, PRI_DEFAULT, start_process, fn_copy);
   struct child_process* child = find_child_process(tid);
   sema_down(&child->sema_load);
+  /* if child not loaded free the resource malloc in thread create */
   if (!child->loaded) {
     return TID_ERROR;
     list_remove(&child->elem);
@@ -178,6 +179,7 @@ static void start_process(void* file_name_) {
     success = load(file_name, &if_.eip, &if_.esp);
   }
 
+  /*  fill user stack */
   if (success) {
     fill_stack_args(&if_.esp, file_name, saved_ptr);
   }
@@ -191,12 +193,14 @@ static void start_process(void* file_name_) {
     t->pcb = NULL;
     free(pcb_to_free);
   } else {
+    /* set parent load status */
     thread_current()->child_ptr->loaded = true;
   }
 
-  /* Clean up. Exit on failure or jump to userspace */
+  /* now parent known if load failed, it can run */
   sema_up(&thread_current()->child_ptr->sema_load);
 
+  /* Clean up. Exit on failure or jump to userspace */
   if (!success) {
     sema_up(&thread_current()->parent->sema);
     thread_exit();
@@ -212,6 +216,7 @@ static void start_process(void* file_name_) {
   NOT_REACHED();
 }
 
+/* find the child process belong to child_pid */
 static struct child_process* find_child_process(pid_t child_pid) {
   struct list_elem* e;
   struct list* children = &thread_current()->children;
@@ -235,12 +240,15 @@ static struct child_process* find_child_process(pid_t child_pid) {
    does nothing. */
 int process_wait(pid_t child_pid) {
   struct child_process* child = find_child_process(child_pid);
+  /* pid not valid or already called */
   if (!child || child->wait_called) {
     return -1;
   }
   child->wait_called = true;
   list_remove(&child->elem);
+  /* wait for child */
   sema_down(&thread_current()->sema);
+  /* free child resource */
   int state = child->exit_status;
   free(child);
   return state;
@@ -251,6 +259,7 @@ void process_exit(void) {
   struct thread* cur = thread_current();
   uint32_t* pd;
 
+  /* child_ptr not free by parent if exited not set */
   cur->child_ptr->exited = true;
 
   /* If this thread does not have a PCB, don't worry */
@@ -420,6 +429,7 @@ bool load(const char* file_name, void (**eip)(void), void** esp) {
     goto done;
   }
 
+  /* can't write when process execute */
   file_deny_write(file);
 
   /* Read and verify executable header. */
