@@ -295,6 +295,9 @@ void process_exit(void) {
     }
   }
 
+  /* free file executable resource */
+  file_close(cur->exec_file);
+
   /* Free the PCB of this process and kill this thread
      Avoid race where PCB is freed before t->pcb is set to NULL
      If this happens, then an unfortuantely timed timer interrupt
@@ -408,7 +411,10 @@ bool load(const char* file_name, void (**eip)(void), void** esp) {
   process_activate();
 
   /* Open executable file. */
-  file = filesys_open(file_name);
+  /* this file close when process exit */
+  t->exec_file = file = filesys_open(file_name);
+  /*  prevent other process to write */
+  file_deny_write(file);
   if (file == NULL) {
     printf("load: %s: open failed\n", file_name);
     goto done;
@@ -483,7 +489,6 @@ bool load(const char* file_name, void (**eip)(void), void** esp) {
 
 done:
   /* We arrive here whether the load is successful or not. */
-  file_close(file);
   return success;
 }
 

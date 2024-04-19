@@ -102,6 +102,8 @@ struct thread {
   struct child_process* child_ptr; /* child process pointer in parent */
   /* file descriptor */
   struct list fds; /* file descriptors list*/
+  /* executable file resource */
+  struct file* exec_file;
 
 #endif
 
