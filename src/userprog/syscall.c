@@ -9,12 +9,15 @@
 #include "filesys/filesys.h"
 #include "filesys/file.h"
 #include "threads/malloc.h"
+#include "threads/synch.h"
 #include "devices/input.h"
 #include <float.h>
 #include <string.h>
 
 #define SYS_CNT 32
-#define MAX_BUF 256
+
+/* init in syscall_init */
+struct lock fs_lock;
 
 typedef void syscall_handler_func(struct intr_frame*);
 
@@ -174,6 +177,7 @@ static void sys_exec(struct intr_frame* f) {
   check_str(f, (uint8_t*)cmd_line);
   f->eax = process_execute(cmd_line);
 }
+
 static void sys_wait(struct intr_frame* f) {
   uint32_t* args = ((uint32_t*)f->esp);
   pid_t pid;
@@ -191,7 +195,9 @@ static void sys_create(struct intr_frame* f) {
   if (!strcmp(file, "")) {
     error_exit(f, -1);
   }
+  lock_acquire(&fs_lock);
   f->eax = filesys_create(file, initial_size);
+  lock_release(&fs_lock);
 }
 
 static void sys_remove(struct intr_frame* f) {
@@ -202,7 +208,9 @@ static void sys_remove(struct intr_frame* f) {
   if (!strcmp(file, "")) {
     error_exit(f, -1);
   }
+  lock_acquire(&fs_lock);
   f->eax = filesys_remove(file);
+  lock_release(&fs_lock);
 }
 
 static void sys_open(struct intr_frame* f) {
@@ -210,7 +218,9 @@ static void sys_open(struct intr_frame* f) {
   const char* file;
   check_read_or_exit(f, (uint8_t*)&file, (uint8_t*)&args[1]);
   check_str(f, (uint8_t*)file);
+  lock_acquire(&fs_lock);
   struct file* open_file = filesys_open(file);
+  lock_release(&fs_lock);
   if (!open_file) {
     f->eax = -1;
     return;
@@ -253,7 +263,9 @@ static void sys_filesize(struct intr_frame* f) {
   if (!fdp) {
     f->eax = -1;
   }
+  lock_acquire(&fs_lock);
   f->eax = file_length(fdp->file);
+  lock_release(&fs_lock);
 }
 
 static void sys_close(struct intr_frame* f) {
@@ -264,7 +276,9 @@ static void sys_close(struct intr_frame* f) {
   if (!fdp) {
     error_exit(f, -1);
   }
+  lock_acquire(&fs_lock);
   file_close(fdp->file);
+  lock_release(&fs_lock);
   list_remove(&fdp->elem);
   free(fdp);
 }
@@ -294,11 +308,9 @@ static void sys_read(struct intr_frame* f) {
       error_exit(f, -1);
     }
     /* buffer write */
-    while (size > MAX_BUF) {
-      num_read += file_read(fdp->file, buffer, MAX_BUF);
-      size -= MAX_BUF;
-    }
+    lock_acquire(&fs_lock);
     num_read += file_read(fdp->file, buffer, size);
+    lock_release(&fs_lock);
   }
   f->eax = num_read;
   return;
@@ -316,12 +328,6 @@ static void sys_write(struct intr_frame* f) {
   int num_writen = 0;
   if (fd == STDOUT_FILENO) {
     /* buffer write */
-    while (size > MAX_BUF) {
-      putbuf(buffer, MAX_BUF);
-      buffer = (uint8_t*)buffer + MAX_BUF;
-      num_writen += MAX_BUF;
-      size -= MAX_BUF;
-    }
     putbuf(buffer, size);
     num_writen += size;
   } else {
@@ -330,11 +336,9 @@ static void sys_write(struct intr_frame* f) {
       error_exit(f, -1);
     }
     /* buffer write */
-    while (size > MAX_BUF) {
-      num_writen += file_write(fdp->file, buffer, MAX_BUF);
-      size -= MAX_BUF;
-    }
+    lock_acquire(&fs_lock);
     num_writen += file_write(fdp->file, buffer, size);
+    lock_release(&fs_lock);
   }
   f->eax = num_writen;
   return;
@@ -350,7 +354,9 @@ static void sys_seek(struct intr_frame* f) {
   if (!fdp) {
     error_exit(f, -1);
   }
+  lock_acquire(&fs_lock);
   file_seek(fdp->file, position);
+  lock_release(&fs_lock);
 }
 
 static void sys_tell(struct intr_frame* f) {
@@ -361,7 +367,9 @@ static void sys_tell(struct intr_frame* f) {
   if (!fdp) {
     error_exit(f, -1);
   }
+  lock_acquire(&fs_lock);
   f->eax = file_tell(fdp->file);
+  lock_release(&fs_lock);
 }
 
 /* floating point opeartions */
@@ -405,6 +413,8 @@ void syscall_init(void) {
   register_handler(SYS_READDIR, dump);
   register_handler(SYS_ISDIR, dump);
   register_handler(SYS_INUMBER, dump);
+  /* file system global lock */
+  lock_init(&fs_lock);
 }
 
 static void syscall_handler(struct intr_frame* f) {
