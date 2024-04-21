@@ -205,6 +205,8 @@ static void start_process(void* file_name_) {
     thread_exit();
   }
 
+  list_init(&t->pcb->fds);
+
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
      threads/intr-stubs.S).  Because intr_exit takes all of its
@@ -267,6 +269,18 @@ void process_exit(void) {
     NOT_REACHED();
   }
 
+  /* free file descriptors */
+  struct list_elem* e;
+  struct list* fds = &cur->pcb->fds;
+  for (e = list_begin(fds); e != list_end(fds);) {
+    struct file_descriptor* f = list_entry(e, struct file_descriptor, elem);
+    file_close(f->file);
+    e = list_next(e);
+    free(f);
+  }
+  /* free file executable resource */
+  file_close(cur->pcb->exec_file);
+
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
   pd = cur->pcb->pagedir;
@@ -283,16 +297,6 @@ void process_exit(void) {
     pagedir_destroy(pd);
   }
 
-  /* free file descriptors */
-  struct list_elem* e;
-  struct list* fds = &thread_current()->fds;
-  for (e = list_begin(fds); e != list_end(fds);) {
-    struct file_descriptor* f = list_entry(e, struct file_descriptor, elem);
-    file_close(f->file);
-    e = list_next(e);
-    free(f);
-  }
-
   /* free  standalone child state */
   struct list* children = &thread_current()->children;
   for (e = list_begin(children); e != list_end(children);) {
@@ -303,9 +307,6 @@ void process_exit(void) {
       free(child);
     }
   }
-
-  /* free file executable resource */
-  file_close(cur->exec_file);
 
   /* Free the PCB of this process and kill this thread
      Avoid race where PCB is freed before t->pcb is set to NULL
@@ -421,7 +422,7 @@ bool load(const char* file_name, void (**eip)(void), void** esp) {
 
   /* Open executable file. */
   /* this file close when process exit */
-  t->exec_file = file = filesys_open(file_name);
+  t->pcb->exec_file = file = filesys_open(file_name);
   /*  prevent other process to write */
   if (file == NULL) {
     printf("load: %s: open failed\n", file_name);

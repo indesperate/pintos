@@ -227,7 +227,7 @@ static void sys_open(struct intr_frame* f) {
   }
   /* set fds */
   struct file_descriptor* fdp = malloc(sizeof(struct file_descriptor));
-  struct list* fds = &thread_current()->fds;
+  struct list* fds = &thread_current()->pcb->fds;
   int fd = 2;
   if (!list_empty(fds)) {
     struct file_descriptor* end = list_entry(list_back(fds), struct file_descriptor, elem);
@@ -245,7 +245,7 @@ static struct file_descriptor* find_fd(int fd) {
     return NULL;
   }
   struct list_elem* e;
-  struct list* fds = &thread_current()->fds;
+  struct list* fds = &thread_current()->pcb->fds;
   for (e = list_begin(fds); e != list_end(fds); e = list_next(e)) {
     struct file_descriptor* f = list_entry(e, struct file_descriptor, elem);
     if (f->fd == fd) {

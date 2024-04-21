@@ -452,7 +452,6 @@ static void init_thread(struct thread* t, const char* name, int priority) {
   t->parent = NULL;
   t->child_ptr = NULL;
   sema_init(&t->sema, 0);
-  list_init(&t->fds);
 
   old_level = intr_disable();
   list_push_back(&all_list, &t->allelem);
