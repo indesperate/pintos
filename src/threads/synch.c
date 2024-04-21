@@ -211,7 +211,6 @@ void lock_release(struct lock* lock) {
 
   lock->holder = NULL;
   sema_up(&lock->semaphore);
-  thread_yield();
 }
 
 /* Returns true if the current thread holds LOCK, false
@@ -285,6 +284,7 @@ void rw_lock_release(struct rw_lock* rw_lock, bool reader) {
 struct semaphore_elem {
   struct list_elem elem;      /* List element. */
   struct semaphore semaphore; /* This semaphore. */
+  int priority;               /* waiter priority */
 };
 
 /* Initializes condition variable COND.  A condition variable
@@ -294,6 +294,13 @@ void cond_init(struct condition* cond) {
   ASSERT(cond != NULL);
 
   list_init(&cond->waiters);
+}
+
+static bool prio_sema_compare_func(const struct list_elem* a, const struct list_elem* b,
+                                   void* aux UNUSED) {
+  struct semaphore_elem* at = list_entry(a, struct semaphore_elem, elem);
+  struct semaphore_elem* bt = list_entry(b, struct semaphore_elem, elem);
+  return at->priority > bt->priority;
 }
 
 /* Atomically releases LOCK and waits for COND to be signaled by
@@ -323,9 +330,9 @@ void cond_wait(struct condition* cond, struct lock* lock) {
   ASSERT(lock != NULL);
   ASSERT(!intr_context());
   ASSERT(lock_held_by_current_thread(lock));
-
+  waiter.priority = thread_current()->priority;
   sema_init(&waiter.semaphore, 0);
-  list_insert_ordered(&cond->waiters, &waiter.elem, prio_compare_func, NULL);
+  list_insert_ordered(&cond->waiters, &waiter.elem, prio_sema_compare_func, NULL);
   lock_release(lock);
   sema_down(&waiter.semaphore);
   lock_acquire(lock);

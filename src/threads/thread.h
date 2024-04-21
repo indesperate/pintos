@@ -104,6 +104,7 @@ struct thread {
   /* timer sleep utils */
   int64_t sleep_start;
   int64_t sleep_ticks;
+  struct list_elem sleep_elem;
 
   /* Owned by thread.c. */
   unsigned magic; /* Detects stack overflow. */
