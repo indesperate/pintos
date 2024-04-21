@@ -64,7 +64,7 @@ pid_t process_execute(const char* file_name) {
   /* Create a new thread to execute FILE_NAME. */
   tid = thread_create(file_name, PRI_DEFAULT, start_process, fn_copy);
   struct child_process* child = find_child_process(tid);
-  sema_down(&child->sema_load);
+  sema_down(&child->load_sema);
   /* if child not loaded free the resource malloc in thread create */
   if (!child->loaded) {
     return TID_ERROR;
@@ -193,15 +193,15 @@ static void start_process(void* file_name_) {
     free(pcb_to_free);
   } else {
     /* set parent load status */
-    thread_current()->child_ptr->loaded = true;
+    t->child_ptr->loaded = true;
   }
 
   /* now parent known if load failed, it can run */
-  sema_up(&thread_current()->child_ptr->sema_load);
+  sema_up(&t->child_ptr->load_sema);
 
   /* Clean up. Exit on failure or jump to userspace */
   if (!success) {
-    sema_up(&thread_current()->parent->sema);
+    sema_up(&t->child_ptr->wait_sema);
     thread_exit();
   }
 
@@ -223,7 +223,7 @@ static struct child_process* find_child_process(pid_t child_pid) {
   struct list* children = &thread_current()->children;
   for (e = list_begin(children); e != list_end(children); e = list_next(e)) {
     struct child_process* f = list_entry(e, struct child_process, elem);
-    if (f->pid == child_pid) {
+    if (f->tid == child_pid) {
       return f;
     }
   }
@@ -248,7 +248,7 @@ int process_wait(pid_t child_pid) {
   child->wait_called = true;
   list_remove(&child->elem);
   /* wait for child */
-  sema_down(&thread_current()->sema);
+  sema_down(&child->wait_sema);
   /* free child resource */
   int state = child->exit_status;
   free(child);
@@ -297,17 +297,6 @@ void process_exit(void) {
     pagedir_destroy(pd);
   }
 
-  /* free  standalone child state */
-  struct list* children = &thread_current()->children;
-  for (e = list_begin(children); e != list_end(children);) {
-    struct child_process* child = list_entry(e, struct child_process, elem);
-    e = list_next(e);
-    /* TODO: find a way to deal with zombie thread, runining but not waited */
-    if (child->exited && !child->wait_called) {
-      free(child);
-    }
-  }
-
   /* Free the PCB of this process and kill this thread
      Avoid race where PCB is freed before t->pcb is set to NULL
      If this happens, then an unfortuantely timed timer interrupt
@@ -316,7 +305,7 @@ void process_exit(void) {
   cur->pcb = NULL;
   free(pcb_to_free);
 
-  sema_up(&thread_current()->parent->sema);
+  sema_up(&cur->child_ptr->wait_sema);
   thread_exit();
 }
 

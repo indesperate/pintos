@@ -95,10 +95,8 @@ struct thread {
 
 #ifdef USERPROG
   /* Owned by process.c. */
-  struct semaphore sema;           /* semaphore to trace child process*/
   struct process* pcb;             /* Process control block if this thread is a userprog */
   struct list children;            /* children list */
-  struct thread* parent;           /* thread parent */
   struct child_process* child_ptr; /* child process pointer in parent */
 
 #endif
@@ -108,8 +106,9 @@ struct thread {
 };
 
 struct child_process {
-  struct semaphore sema_load; /* load status semaphore */
-  tid_t pid;                  /* children pid */
+  struct semaphore wait_sema; /* semaphore to wait child process*/
+  struct semaphore load_sema; /* load status semaphore */
+  tid_t tid;                  /* children tid */
   int exit_status;            /* exit status */
   bool exited;                /* if exited */
   bool wait_called;           /* if already called wait*/
