@@ -79,8 +79,15 @@ void timer_sleep(int64_t ticks) {
   int64_t start = timer_ticks();
 
   ASSERT(intr_get_level() == INTR_ON);
-  while (timer_elapsed(start) < ticks)
-    thread_yield();
+  if (timer_elapsed(start) < ticks) {
+    struct thread* t = thread_current();
+    t->sleep_ticks = ticks;
+    t->sleep_start = start;
+    enum intr_level old_level;
+    old_level = intr_disable();
+    thread_block();
+    intr_set_level(old_level);
+  }
 }
 
 /* Sleeps for approximately MS milliseconds.  Interrupts must be
@@ -125,10 +132,22 @@ void timer_ndelay(int64_t ns) { real_time_delay(ns, 1000 * 1000 * 1000); }
 /* Prints timer statistics. */
 void timer_print_stats(void) { printf("Timer: %" PRId64 " ticks\n", timer_ticks()); }
 
+static void wake_up_sleep_thread(struct thread* t, void* aux UNUSED) {
+  if (t->status == THREAD_BLOCKED && t->sleep_ticks > 0) {
+    int64_t elapsed = timer_elapsed(t->sleep_start);
+    if (elapsed >= t->sleep_ticks) {
+      t->sleep_start = 0;
+      t->sleep_ticks = 0;
+      thread_unblock(t);
+    }
+  }
+}
+
 /* Timer interrupt handler. */
 static void timer_interrupt(struct intr_frame* args UNUSED) {
   ticks++;
   thread_tick();
+  thread_foreach(wake_up_sleep_thread, NULL);
 }
 
 /* Returns true if LOOPS iterations waits for more than one timer

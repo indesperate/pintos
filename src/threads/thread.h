@@ -101,6 +101,10 @@ struct thread {
 
 #endif
 
+  /* timer sleep utils */
+  int64_t sleep_start;
+  int64_t sleep_ticks;
+
   /* Owned by thread.c. */
   unsigned magic; /* Detects stack overflow. */
 };
