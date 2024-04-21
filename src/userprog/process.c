@@ -62,7 +62,12 @@ pid_t process_execute(const char* file_name) {
   strlcpy(fn_copy, file_name, PGSIZE);
 
   /* Create a new thread to execute FILE_NAME. */
-  tid = thread_create(file_name, PRI_DEFAULT, start_process, fn_copy);
+  char* thread_name = palloc_get_page(0);
+  /* make thread name strip of args */
+  strlcpy(thread_name, file_name, strcspn(file_name, " ") + 1);
+  tid = thread_create(thread_name, PRI_DEFAULT, start_process, fn_copy);
+  palloc_free_page(thread_name);
+
   struct child_thread* child = find_child_process(tid);
   sema_down(&child->load_sema);
   /* if child not loaded free the resource malloc in thread create */
