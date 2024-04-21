@@ -95,9 +95,9 @@ struct thread {
 
 #ifdef USERPROG
   /* Owned by process.c. */
-  struct process* pcb;             /* Process control block if this thread is a userprog */
-  struct list children;            /* children list */
-  struct child_process* child_ptr; /* child process pointer in parent */
+  struct process* pcb;            /* Process control block if this thread is a userprog */
+  struct list children;           /* children list */
+  struct child_thread* child_ptr; /* child process pointer in parent */
 
 #endif
 
@@ -105,15 +105,15 @@ struct thread {
   unsigned magic; /* Detects stack overflow. */
 };
 
-struct child_process {
+struct child_thread {
+  tid_t tid;             /* children tid */
+  struct list_elem elem; /* list elem */
+  /* only for userprog processes */
   struct semaphore wait_sema; /* semaphore to wait child process*/
   struct semaphore load_sema; /* load status semaphore */
-  tid_t tid;                  /* children tid */
   int exit_status;            /* exit status */
-  bool exited;                /* if exited */
   bool wait_called;           /* if already called wait*/
   bool loaded;                /* if load successful */
-  struct list_elem elem;      /* list elem */
 };
 
 /* Types of scheduler that the user can request the kernel

@@ -208,13 +208,12 @@ tid_t thread_create(const char* name, int priority, thread_func* function, void*
   sf->eip = switch_entry;
   sf->ebp = 0;
 
-  /* child_process for parent */
-  struct child_process* child = malloc(sizeof(struct child_process));
+  /* child_thread for parent */
+  struct child_thread* child = malloc(sizeof(struct child_thread));
   child->exit_status = -1;
   child->tid = tid;
   child->wait_called = false;
   child->loaded = false;
-  child->exited = false;
   sema_init(&child->wait_sema, 0);
   sema_init(&child->load_sema, 0);
   list_push_back(&thread_current()->children, &child->elem);
@@ -548,12 +547,10 @@ void thread_switch_tail(struct thread* prev) {
     struct list_elem* e;
     struct list* children = &prev->children;
     for (e = list_begin(children); e != list_end(children);) {
-      struct child_process* child = list_entry(e, struct child_process, elem);
+      struct child_thread* child = list_entry(e, struct child_thread, elem);
       e = list_next(e);
-      /* TODO: find a way to deal with zombie thread, runining but not waited */
-      if (child->exited && !child->wait_called) {
-        free(child);
-      }
+      /* TODO: find a way to deal with zombie thread, running but not waited, it may still use child_ptr*/
+      free(child);
     }
     palloc_free_page(prev);
   }

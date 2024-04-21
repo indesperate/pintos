@@ -151,7 +151,6 @@ static void sys_exit(struct intr_frame* f) {
   int status;
   uint32_t* args = ((uint32_t*)f->esp);
   check_read_or_exit(f, (uint8_t*)&status, (uint8_t*)&args[1]);
-  ASSERT(thread_current()->child_ptr != NULL);
   thread_current()->child_ptr->exit_status = status;
   error_exit(f, status);
 }

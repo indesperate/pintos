@@ -23,7 +23,7 @@
 static thread_func start_process NO_RETURN;
 static thread_func start_pthread NO_RETURN;
 static bool load(const char* file_name, void (**eip)(void), void** esp);
-static struct child_process* find_child_process(pid_t child_pid);
+static struct child_thread* find_child_process(pid_t child_pid);
 bool setup_thread(void (**eip)(void), void** esp);
 
 /* Initializes user programs in the system by ensuring the main
@@ -63,7 +63,7 @@ pid_t process_execute(const char* file_name) {
 
   /* Create a new thread to execute FILE_NAME. */
   tid = thread_create(file_name, PRI_DEFAULT, start_process, fn_copy);
-  struct child_process* child = find_child_process(tid);
+  struct child_thread* child = find_child_process(tid);
   sema_down(&child->load_sema);
   /* if child not loaded free the resource malloc in thread create */
   if (!child->loaded) {
@@ -218,11 +218,11 @@ static void start_process(void* file_name_) {
 }
 
 /* find the child process belong to child_pid */
-static struct child_process* find_child_process(pid_t child_pid) {
+static struct child_thread* find_child_process(pid_t child_pid) {
   struct list_elem* e;
   struct list* children = &thread_current()->children;
   for (e = list_begin(children); e != list_end(children); e = list_next(e)) {
-    struct child_process* f = list_entry(e, struct child_process, elem);
+    struct child_thread* f = list_entry(e, struct child_thread, elem);
     if (f->tid == child_pid) {
       return f;
     }
@@ -240,7 +240,7 @@ static struct child_process* find_child_process(pid_t child_pid) {
    This function will be implemented in problem 2-2.  For now, it
    does nothing. */
 int process_wait(pid_t child_pid) {
-  struct child_process* child = find_child_process(child_pid);
+  struct child_thread* child = find_child_process(child_pid);
   /* pid not valid or already called */
   if (!child || child->wait_called) {
     return -1;
@@ -259,9 +259,6 @@ int process_wait(pid_t child_pid) {
 void process_exit(void) {
   struct thread* cur = thread_current();
   uint32_t* pd;
-
-  /* child_ptr not free by parent if exited not set */
-  cur->child_ptr->exited = true;
 
   /* If this thread does not have a PCB, don't worry */
   if (cur->pcb == NULL) {
