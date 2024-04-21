@@ -247,7 +247,7 @@ void thread_block(void) {
 bool prio_compare_func(const struct list_elem* a, const struct list_elem* b, void* aux UNUSED) {
   struct thread* at = list_entry(a, struct thread, elem);
   struct thread* bt = list_entry(b, struct thread, elem);
-  return at->priority > bt->priority;
+  return at->priority < bt->priority;
 }
 
 /* Places a thread on the ready structure appropriate for the
@@ -261,7 +261,7 @@ static void thread_enqueue(struct thread* t) {
   if (active_sched_policy == SCHED_FIFO)
     list_push_back(&fifo_ready_list, &t->elem);
   else if (active_sched_policy == SCHED_PRIO) {
-    list_insert_ordered(&prio_ready_list, &t->elem, prio_compare_func, NULL);
+    list_push_back(&prio_ready_list, &t->elem);
   } else
     PANIC("Unimplemented scheduling policy value: %d", active_sched_policy);
 }
@@ -513,9 +513,11 @@ static struct thread* thread_schedule_fifo(void) {
 
 /* Strict priority scheduler */
 static struct thread* thread_schedule_prio(void) {
-  if (!list_empty(&prio_ready_list))
-    return list_entry(list_pop_front(&prio_ready_list), struct thread, elem);
-  else
+  if (!list_empty(&prio_ready_list)) {
+    struct list_elem* e = list_max(&prio_ready_list, prio_compare_func, NULL);
+    list_remove(e);
+    return list_entry(e, struct thread, elem);
+  } else
     return idle_thread;
 }
 
