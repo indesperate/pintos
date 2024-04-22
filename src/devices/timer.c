@@ -31,6 +31,7 @@ static bool too_many_loops(unsigned loops);
 static void busy_wait(int64_t loops);
 static void real_time_sleep(int64_t num, int32_t denom);
 static void real_time_delay(int64_t num, int32_t denom);
+static void wake_up_sleep_thread(void);
 
 /* Sets up the timer to interrupt TIMER_FREQ times per second,
    and registers the corresponding interrupt. */
@@ -84,8 +85,7 @@ void timer_sleep(int64_t ticks) {
   ASSERT(intr_get_level() == INTR_ON);
   if (timer_elapsed(start) < ticks) {
     struct thread* t = thread_current();
-    t->sleep_ticks = ticks;
-    t->sleep_start = start;
+    t->sleep_ticks = ticks - timer_elapsed(start);
     enum intr_level old_level;
     old_level = intr_disable();
     list_push_back(&sleep_list, &t->sleep_elem);
@@ -136,19 +136,16 @@ void timer_ndelay(int64_t ns) { real_time_delay(ns, 1000 * 1000 * 1000); }
 /* Prints timer statistics. */
 void timer_print_stats(void) { printf("Timer: %" PRId64 " ticks\n", timer_ticks()); }
 
-static void wake_up_sleep_thread() {
+static void wake_up_sleep_thread(void) {
   struct list_elem* e;
   ASSERT(intr_get_level() == INTR_OFF);
   for (e = list_begin(&sleep_list); e != list_end(&sleep_list); e = list_next(e)) {
     struct thread* t = list_entry(e, struct thread, sleep_elem);
-    if (t->status == THREAD_BLOCKED && t->sleep_ticks > 0) {
-      int64_t elapsed = timer_elapsed(t->sleep_start);
-      if (elapsed >= t->sleep_ticks) {
-        t->sleep_start = 0;
-        t->sleep_ticks = 0;
-        list_remove(&t->sleep_elem);
-        thread_unblock(t);
-      }
+    ASSERT(t->sleep_ticks > 0);
+    t->sleep_ticks -= 1;
+    if (t->sleep_ticks == 0) {
+      list_remove(&t->sleep_elem);
+      thread_unblock(t);
     }
   }
 }

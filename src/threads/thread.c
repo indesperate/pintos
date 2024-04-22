@@ -484,7 +484,6 @@ static void init_thread(struct thread* t, const char* name, int priority) {
   t->magic = THREAD_MAGIC;
   list_init(&t->children);
   t->child_ptr = NULL;
-  t->sleep_start = 0;
   t->sleep_ticks = 0;
 
   old_level = intr_disable();
