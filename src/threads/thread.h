@@ -105,6 +105,11 @@ struct thread {
   int64_t sleep_ticks;
   struct list_elem sleep_elem;
 
+  /* priority donate utils */
+  int base_priority;      /* thread base priority if donated, -1 for not donated */
+  struct list locks;      /* thread current hold locks */
+  struct lock* wait_lock; /* thread current wait lock for chain lock that is low priority */
+
   /* Owned by thread.c. */
   unsigned magic; /* Detects stack overflow. */
 };

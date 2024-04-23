@@ -372,7 +372,13 @@ void thread_foreach(thread_action_func* func, void* aux) {
 void thread_set_priority(int new_priority) {
   struct thread* t = thread_current();
   bool yield = t->priority > new_priority;
-  t->priority = new_priority;
+  if (t->base_priority != -1) {
+    t->base_priority = new_priority;
+    /* if new priority bigger should not yield, if smaller, should also not yield*/
+    yield = false;
+  } else {
+    t->priority = new_priority;
+  }
   if (yield) {
     thread_yield();
   }
@@ -482,9 +488,15 @@ static void init_thread(struct thread* t, const char* name, int priority) {
   t->priority = priority;
   t->pcb = NULL;
   t->magic = THREAD_MAGIC;
+  /* child userprog util */
   list_init(&t->children);
   t->child_ptr = NULL;
+  /* slepp util */
   t->sleep_ticks = 0;
+  /* priority util */
+  list_init(&t->locks);
+  t->wait_lock = NULL;
+  t->base_priority = -1;
 
   old_level = intr_disable();
   list_push_back(&all_list, &t->allelem);

@@ -166,6 +166,37 @@ void lock_init(struct lock* lock) {
 
   lock->holder = NULL;
   sema_init(&lock->semaphore, 1);
+  lock->donated_priority = -1;
+}
+
+static bool lock_prio_compare_func(const struct list_elem* a, const struct list_elem* b,
+                                   void* aux UNUSED) {
+  struct lock* al = list_entry(a, struct lock, elem);
+  struct lock* bl = list_entry(b, struct lock, elem);
+  return al->donated_priority < bl->donated_priority;
+}
+
+/* change the lock holders max priority */
+static void change_max_lock_prio(struct thread* holder) {
+  ASSERT(!list_empty(&holder->locks));
+  struct lock* max =
+      list_entry(list_max(&holder->locks, lock_prio_compare_func, NULL), struct lock, elem);
+  /* the lock holder thread has not been donated */
+  if (holder->base_priority == -1) {
+    holder->base_priority = holder->priority;
+  }
+  holder->priority = max->donated_priority;
+}
+
+/* donated current thread priority to another lock */
+static void thread_donate(struct thread* cur, struct lock* lock) {
+  struct thread* holder = lock->holder;
+  lock->donated_priority = cur->priority;
+  change_max_lock_prio(holder);
+  /* thread donate to thread wait lock */
+  if (holder->wait_lock) {
+    thread_donate(cur, holder->wait_lock);
+  }
 }
 
 /* Acquires LOCK, sleeping until it becomes available if
@@ -181,8 +212,20 @@ void lock_acquire(struct lock* lock) {
   ASSERT(!intr_context());
   ASSERT(!lock_held_by_current_thread(lock));
 
-  sema_down(&lock->semaphore);
-  lock->holder = thread_current();
+  struct thread* t = thread_current();
+
+  int success = lock_try_acquire(lock);
+  if (!success) {
+    if (t->priority > lock->holder->priority) {
+      thread_donate(t, lock);
+      /* set wait lock */
+      t->wait_lock = lock;
+    }
+    sema_down(&lock->semaphore);
+    lock->holder = thread_current();
+  } else {
+    list_push_back(&t->locks, &lock->elem);
+  }
 }
 
 /* Tries to acquires LOCK and returns true if successful or false
@@ -212,6 +255,29 @@ void lock_release(struct lock* lock) {
   ASSERT(lock != NULL);
   ASSERT(lock_held_by_current_thread(lock));
 
+  /* remove from list */
+  list_remove(&lock->elem);
+
+  struct thread* cur = thread_current();
+
+  /* if the lock has been donated, need to set priority back */
+  if (lock->donated_priority != -1) {
+    /* max priority lock */
+    struct lock* max = NULL;
+    if (!list_empty(&cur->locks)) {
+      max = list_entry(list_max(&cur->locks, lock_prio_compare_func, NULL), struct lock, elem);
+    }
+    if (max != NULL && max->donated_priority != -1) {
+      /* there another donated priority */
+      cur->priority = max->donated_priority;
+    } else {
+      /* no other locks or other lock has no donated priority, need to set it back */
+      cur->priority = cur->base_priority;
+      cur->base_priority = -1;
+    }
+    /* set lock to not donated */
+    lock->donated_priority = -1;
+  }
   lock->holder = NULL;
   sema_up(&lock->semaphore);
 }
