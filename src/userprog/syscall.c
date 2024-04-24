@@ -386,6 +386,27 @@ static void sys_compute_e(struct intr_frame* f) {
   f->eax = sys_sum_to_e(n);
 }
 
+static void sys_pt_create(struct intr_frame* f) {
+  uint32_t* args = ((uint32_t*)f->esp);
+  stub_fun sfun;
+  pthread_fun tfun;
+  void* arg;
+  check_read_or_exit(f, (uint8_t*)&sfun, (uint8_t*)&args[1]);
+  check_read_or_exit(f, (uint8_t*)&tfun, (uint8_t*)&args[2]);
+  check_read_or_exit(f, (uint8_t*)&arg, (uint8_t*)&args[3]);
+  f->eax = pthread_execute(sfun, tfun, arg);
+}
+
+static void sys_pt_exit(struct intr_frame* f UNUSED) { pthread_exit(); }
+static void sys_pt_join(struct intr_frame* f) {
+  uint32_t* args = ((uint32_t*)f->esp);
+  tid_t tid;
+  check_read_or_exit(f, (uint8_t*)&tid, (uint8_t*)&args[1]);
+  f->eax = pthread_join(tid);
+}
+
+static void sys_lock_init(struct intr_frame* f) { f->eax = 1; }
+
 void syscall_init(void) {
   intr_register_int(0x30, 3, INTR_ON, syscall_handler, "syscall");
   register_handler(SYS_HALT, sys_halt);
@@ -403,12 +424,12 @@ void syscall_init(void) {
   register_handler(SYS_CLOSE, sys_close);
   register_handler(SYS_PRACTICE, sys_practice);
   register_handler(SYS_COMPUTE_E, sys_compute_e);
-  register_handler(SYS_PT_CREATE, dump);
-  register_handler(SYS_PT_EXIT, dump);
-  register_handler(SYS_PT_JOIN, dump);
-  register_handler(SYS_LOCK_INIT, dump);
-  register_handler(SYS_LOCK_ACQUIRE, dump);
-  register_handler(SYS_LOCK_RELEASE, dump);
+  register_handler(SYS_PT_CREATE, sys_pt_create);
+  register_handler(SYS_PT_EXIT, sys_pt_exit);
+  register_handler(SYS_PT_JOIN, sys_pt_join);
+  register_handler(SYS_LOCK_INIT, sys_lock_init);
+  register_handler(SYS_LOCK_ACQUIRE, NULL);
+  register_handler(SYS_LOCK_RELEASE, NULL);
   register_handler(SYS_SEMA_INIT, dump);
   register_handler(SYS_SEMA_DOWN, dump);
   register_handler(SYS_SEMA_UP, dump);
