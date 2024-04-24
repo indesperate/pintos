@@ -141,6 +141,47 @@ static void check_write_buffer(struct intr_frame* f, uint8_t* uaddr, size_t size
   }
 }
 
+static bool check_read_buffer_no_exit(uint8_t* uaddr, size_t size) {
+  uint8_t c;
+  if (size > 0) {
+    if (!check_and_read(&c, uaddr)) {
+      return false;
+    }
+    if (!check_and_read(&c, uaddr + size - 1)) {
+      return false;
+    }
+    while (size > PGSIZE) {
+      uaddr += PGSIZE - 1;
+      if (!check_and_read(&c, uaddr)) {
+        return false;
+      }
+      size -= PGSIZE;
+    }
+  }
+  return true;
+}
+
+static bool check_write_buffer_no_exit(uint8_t* uaddr, size_t size) {
+  /* int 3(debug interrput x86 asm) assembly code is 0xcc */
+  if (size > 0) {
+    uint8_t c = 0xcc;
+    if (!check_and_write(c, uaddr)) {
+      return false;
+    }
+    if (!check_and_write(c, uaddr + size - 1)) {
+      return false;
+    }
+    while (size > PGSIZE) {
+      uaddr += PGSIZE - 1;
+      if (!check_and_write(c, uaddr)) {
+        return false;
+      }
+      size -= PGSIZE;
+    }
+  }
+  return true;
+}
+
 static syscall_handler_func* syscall_handlers[SYS_CNT];
 
 static void register_handler(uint8_t vec_no, syscall_handler_func* handler) {
@@ -405,7 +446,179 @@ static void sys_pt_join(struct intr_frame* f) {
   f->eax = pthread_join(tid);
 }
 
-static void sys_lock_init(struct intr_frame* f) { f->eax = 1; }
+static void sys_lock_init(struct intr_frame* f) {
+  uint32_t* args = ((uint32_t*)f->esp);
+  lock_t* lock;
+  check_read_or_exit(f, (uint8_t*)&lock, (uint8_t*)&args[1]);
+  if (!check_write_buffer_no_exit(lock, 1)) {
+    return false;
+  };
+  struct user_lock* u_lock = malloc(sizeof(struct user_lock));
+  lock_init(&u_lock->lock);
+  if (u_lock == NULL) {
+    f->eax = false;
+    return;
+  }
+  int id = 0;
+  struct process* pcb = thread_current()->pcb;
+  struct list* u_locks = &pcb->locks;
+  lock_acquire(&pcb->thread_lock);
+  if (!list_empty(u_locks)) {
+    struct user_lock* end = list_entry(list_back(u_locks), struct user_lock, elem);
+    id = end->id + 1;
+  }
+  u_lock->id = id;
+  list_push_back(&pcb->locks, &u_lock->elem);
+  lock_release(&pcb->thread_lock);
+  *lock = id;
+  f->eax = true;
+}
+
+static struct user_lock* find_user_lock(lock_t u_lock) {
+  struct list_elem* e;
+  struct list* locks = &thread_current()->pcb->locks;
+  for (e = list_begin(locks); e != list_end(locks); e = list_next(e)) {
+    struct user_lock* l = list_entry(e, struct user_lock, elem);
+    if (l->id == u_lock) {
+      return l;
+    }
+  }
+  return NULL;
+};
+
+static void sys_lock_acquire(struct intr_frame* f) {
+  uint32_t* args = ((uint32_t*)f->esp);
+  lock_t* lock;
+  check_read_or_exit(f, (uint8_t*)&lock, (uint8_t*)&args[1]);
+  if (!check_read_buffer_no_exit(lock, 1)) {
+    f->eax = false;
+    return;
+  }
+  struct process* pcb = thread_current()->pcb;
+  /* get user lock */
+  struct user_lock* u_lock = NULL;
+  lock_acquire(&pcb->thread_lock);
+  u_lock = find_user_lock(*lock);
+  lock_release(&pcb->thread_lock);
+  /* lock not valid or acquire failed */
+  if (u_lock == NULL || lock_held_by_current_thread(&u_lock->lock)) {
+    f->eax = false;
+    return;
+  }
+  lock_acquire(&u_lock->lock);
+  f->eax = true;
+}
+
+static void sys_lock_release(struct intr_frame* f) {
+  uint32_t* args = ((uint32_t*)f->esp);
+  lock_t* lock;
+  check_read_or_exit(f, (uint8_t*)&lock, (uint8_t*)&args[1]);
+  if (!check_read_buffer_no_exit(lock, 1)) {
+    f->eax = false;
+    return;
+  }
+  struct process* pcb = thread_current()->pcb;
+  /* get user lock */
+  struct user_lock* u_lock = NULL;
+  lock_acquire(&pcb->thread_lock);
+  u_lock = find_user_lock(*lock);
+  lock_release(&pcb->thread_lock);
+  /* lock not valid or acquire failed */
+  if (u_lock == NULL || !lock_held_by_current_thread(&u_lock->lock)) {
+    f->eax = false;
+    return;
+  }
+  lock_release(&u_lock->lock);
+  f->eax = true;
+}
+
+static void sys_sema_init(struct intr_frame* f) {
+  uint32_t* args = ((uint32_t*)f->esp);
+  sema_t* sema;
+  int val;
+  check_read_or_exit(f, (uint8_t*)&sema, (uint8_t*)&args[1]);
+  check_read_or_exit(f, (uint8_t*)&val, (uint8_t*)&args[2]);
+  if (!check_write_buffer_no_exit(sema, 1)) {
+    return false;
+  };
+  struct user_sema* u_sema = malloc(sizeof(struct user_sema));
+  sema_init(&u_sema->sema, val);
+  if (u_sema == NULL) {
+    f->eax = false;
+    return;
+  }
+  int id = 0;
+  struct process* pcb = thread_current()->pcb;
+  struct list* u_semas = &pcb->semas;
+  lock_acquire(&pcb->thread_lock);
+  if (!list_empty(u_semas)) {
+    struct user_sema* end = list_entry(list_back(u_semas), struct user_sema, elem);
+    id = end->id + 1;
+  }
+  u_sema->id = id;
+  list_push_back(&pcb->semas, &u_sema->elem);
+  lock_release(&pcb->thread_lock);
+  *sema = id;
+  f->eax = true;
+}
+
+static struct user_sema* find_user_sema(sema_t u_sema) {
+  struct list_elem* e;
+  struct list* semas = &thread_current()->pcb->semas;
+  for (e = list_begin(semas); e != list_end(semas); e = list_next(e)) {
+    struct user_sema* l = list_entry(e, struct user_sema, elem);
+    if (l->id == u_sema) {
+      return l;
+    }
+  }
+  return NULL;
+};
+
+static void sys_sema_down(struct intr_frame* f) {
+  uint32_t* args = ((uint32_t*)f->esp);
+  sema_t* sema;
+  check_read_or_exit(f, (uint8_t*)&sema, (uint8_t*)&args[1]);
+  if (!check_read_buffer_no_exit(sema, 1)) {
+    f->eax = false;
+    return;
+  }
+  struct process* pcb = thread_current()->pcb;
+  /* get user sema */
+  struct user_sema* u_sema = NULL;
+  lock_acquire(&pcb->thread_lock);
+  u_sema = find_user_sema(*sema);
+  lock_release(&pcb->thread_lock);
+  /* sema not valid or acquire failed */
+  if (u_sema == NULL) {
+    f->eax = false;
+    return;
+  }
+  sema_down(&u_sema->sema);
+  f->eax = true;
+}
+
+static void sys_sema_up(struct intr_frame* f) {
+  uint32_t* args = ((uint32_t*)f->esp);
+  sema_t* sema;
+  check_read_or_exit(f, (uint8_t*)&sema, (uint8_t*)&args[1]);
+  if (!check_read_buffer_no_exit(sema, 1)) {
+    f->eax = false;
+    return;
+  }
+  struct process* pcb = thread_current()->pcb;
+  /* get user sema */
+  struct user_sema* u_sema = NULL;
+  lock_acquire(&pcb->thread_lock);
+  u_sema = find_user_sema(*sema);
+  lock_release(&pcb->thread_lock);
+  /* sema not valid or acquire failed */
+  if (u_sema == NULL) {
+    f->eax = false;
+    return;
+  }
+  sema_up(&u_sema->sema);
+  f->eax = true;
+}
 
 void syscall_init(void) {
   intr_register_int(0x30, 3, INTR_ON, syscall_handler, "syscall");
@@ -428,11 +641,11 @@ void syscall_init(void) {
   register_handler(SYS_PT_EXIT, sys_pt_exit);
   register_handler(SYS_PT_JOIN, sys_pt_join);
   register_handler(SYS_LOCK_INIT, sys_lock_init);
-  register_handler(SYS_LOCK_ACQUIRE, NULL);
-  register_handler(SYS_LOCK_RELEASE, NULL);
-  register_handler(SYS_SEMA_INIT, dump);
-  register_handler(SYS_SEMA_DOWN, dump);
-  register_handler(SYS_SEMA_UP, dump);
+  register_handler(SYS_LOCK_ACQUIRE, sys_lock_acquire);
+  register_handler(SYS_LOCK_RELEASE, sys_lock_release);
+  register_handler(SYS_SEMA_INIT, sys_sema_init);
+  register_handler(SYS_SEMA_DOWN, sys_sema_down);
+  register_handler(SYS_SEMA_UP, sys_sema_up);
   register_handler(SYS_MMAP, dump);
   register_handler(SYS_MUNMAP, dump);
   register_handler(SYS_CHDIR, dump);

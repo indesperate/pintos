@@ -13,6 +13,9 @@
    the TID of the main thread of the process */
 typedef tid_t pid_t;
 
+typedef char lock_t;
+typedef char sema_t;
+
 /* Thread functions (Project 2: Multithreading) */
 typedef void (*pthread_fun)(void*);
 typedef void (*stub_fun)(pthread_fun, void*);
@@ -41,6 +44,18 @@ struct pthread_data {
   bool waited;
 };
 
+struct user_lock {
+  lock_t id;             /* id */
+  struct lock lock;      /* kernel lock */
+  struct list_elem elem; /* list elem */
+};
+
+struct user_sema {
+  lock_t id;             /* id */
+  struct semaphore sema; /* kernel lock */
+  struct list_elem elem; /* list elem */
+};
+
 /* The process control block for a given process. Since
    there can be multiple threads per process, we need a separate
    PCB from the TCB. All TCBs in a process will have a pointer
@@ -48,16 +63,21 @@ struct pthread_data {
    of the process, which is `special`. */
 struct process {
   /* Owned by process.c. */
-  uint32_t* pagedir;                  /* Page directory. */
-  char process_name[16];              /* Name of the main thread */
-  struct thread* main_thread;         /* Pointer to main thread */
-  struct list fds;                    /* file descriptors list*/
-  struct file* exec_file;             /* executable file resource */
-  struct list child_processes;        /* process children list */
+  uint32_t* pagedir;          /* Page directory. */
+  char process_name[16];      /* Name of the main thread */
+  struct thread* main_thread; /* Pointer to main thread */
+  /* userprog utils */
+  struct list fds;             /* file descriptors list*/
+  struct file* exec_file;      /* executable file resource */
+  struct list child_processes; /* process children list */
+  /* pthread utils */
   struct list pthreads;               /* process pthreads list */
   struct process_cps_data* child_ptr; /* child ptr in parent */
   uint8_t* stack_begin;               /* stack start virtual address for allocate */
   struct lock thread_lock;            /* lock when access process data */
+  /* syn utils */
+  struct list locks; /* user locks */
+  struct list semas; /* user semas */
 };
 
 void userprog_init(void);

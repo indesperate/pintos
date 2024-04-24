@@ -237,6 +237,9 @@ static void start_process(void* data) {
     t->pcb->stack_begin = PHYS_BASE;
     lock_init(&t->pcb->thread_lock);
     list_init(&t->pcb->pthreads);
+    /* sync utils */
+    list_init(&t->pcb->locks);
+    list_init(&t->pcb->semas);
 
     strlcpy(t->pcb->process_name, t->name, sizeof t->name);
   }
@@ -356,6 +359,21 @@ void process_exit(void) {
     struct process_cps_data* pcd = list_entry(e, struct process_cps_data, elem);
     e = list_next(e);
     free(pcd);
+  }
+
+  /* free user lock and sema resources */
+  struct list* locks = &cur->pcb->locks;
+  for (e = list_begin(locks); e != list_end(locks);) {
+    struct user_lock* lock = list_entry(e, struct user_lock, elem);
+    e = list_next(e);
+    free(lock);
+  }
+
+  struct list* semas = &cur->pcb->semas;
+  for (e = list_begin(semas); e != list_end(semas);) {
+    struct user_sema* sema = list_entry(e, struct user_sema, elem);
+    e = list_next(e);
+    free(sema);
   }
 
   /* Destroy the current process's page directory and switch back
