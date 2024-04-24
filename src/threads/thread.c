@@ -216,9 +216,7 @@ tid_t thread_create(const char* name, int priority, thread_func* function, void*
   child->exit_status = -1;
   child->tid = tid;
   child->wait_called = false;
-  child->loaded = false;
   sema_init(&child->wait_sema, 0);
-  sema_init(&child->load_sema, 0);
   list_push_back(&thread_current()->children, &child->elem);
   t->child_ptr = child;
 

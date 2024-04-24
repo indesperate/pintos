@@ -46,6 +46,12 @@ void userprog_init(void) {
   ASSERT(success);
 }
 
+struct start_process_data {
+  char* cmd_line;
+  struct semaphore load_sema;
+  bool loaded;
+};
+
 /* Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
    before process_execute() returns.  Returns the new process's
@@ -61,20 +67,26 @@ pid_t process_execute(const char* file_name) {
     return TID_ERROR;
   strlcpy(fn_copy, file_name, PGSIZE);
 
+  struct start_process_data* spd = malloc(sizeof(struct start_process_data));
+
+  spd->cmd_line = fn_copy;
+  spd->loaded = false;
+  sema_init(&spd->load_sema, 0);
+
   /* Create a new thread to execute FILE_NAME. */
   char* thread_name = palloc_get_page(0);
   /* make thread name strip of args */
   strlcpy(thread_name, file_name, strcspn(file_name, " ") + 1);
-  tid = thread_create(thread_name, PRI_DEFAULT, start_process, fn_copy);
+  tid = thread_create(thread_name, PRI_DEFAULT, start_process, spd);
   palloc_free_page(thread_name);
 
   struct child_thread* child = find_child_process(tid);
-  sema_down(&child->load_sema);
+  sema_down(&spd->load_sema);
   /* if child not loaded free the resource malloc in thread create */
-  if (!child->loaded) {
-    return TID_ERROR;
+  if (!spd->loaded) {
     list_remove(&child->elem);
     free(child);
+    return TID_ERROR;
   }
   palloc_free_page(fn_copy);
   return tid;
@@ -150,9 +162,10 @@ static void fill_stack_args(void** esp, char* file_name, char* saved_ptr) {
 
 /* A thread function that loads a user process and starts it
    running. */
-static void start_process(void* file_name_) {
+static void start_process(void* data) {
+  struct start_process_data* spd = data;
   char* saved_ptr;
-  char* file_name = strtok_r((char*)file_name_, " ", &saved_ptr);
+  char* file_name = strtok_r(spd->cmd_line, " ", &saved_ptr);
   struct thread* t = thread_current();
   struct intr_frame if_;
   bool success, pcb_success;
@@ -198,11 +211,11 @@ static void start_process(void* file_name_) {
     free(pcb_to_free);
   } else {
     /* set parent load status */
-    t->child_ptr->loaded = true;
+    spd->loaded = true;
   }
 
   /* now parent known if load failed, it can run */
-  sema_up(&t->child_ptr->load_sema);
+  sema_up(&spd->load_sema);
 
   /* Clean up. Exit on failure or jump to userspace */
   if (!success) {

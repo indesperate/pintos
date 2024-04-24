@@ -119,10 +119,8 @@ struct child_thread {
   struct list_elem elem; /* list elem */
   /* only for userprog processes */
   struct semaphore wait_sema; /* semaphore to wait child process*/
-  struct semaphore load_sema; /* load status semaphore */
   int exit_status;            /* exit status */
   bool wait_called;           /* if already called wait*/
-  bool loaded;                /* if load successful */
 };
 
 /* Types of scheduler that the user can request the kernel
