@@ -111,6 +111,14 @@ pid_t process_execute(const char* file_name) {
   /* Create a new thread to execute FILE_NAME. */
   tid = thread_create(thread_name, PRI_DEFAULT, start_process, spd);
 
+  if (tid == TID_ERROR) {
+    free(spd);
+    free(fn_copy);
+    free(thread_name);
+    free(child_ptr);
+    return TID_ERROR;
+  }
+
   sema_down(&spd->load_sema);
 
   /* free resources */
