@@ -226,6 +226,13 @@ static void sys_open(struct intr_frame* f) {
   }
   /* set fds */
   struct file_descriptor* fdp = malloc(sizeof(struct file_descriptor));
+  if (fdp == NULL) {
+    lock_acquire(&fs_lock);
+    file_close(open_file);
+    lock_release(&fs_lock);
+    f->eax = -1;
+    return;
+  }
   struct list* fds = &thread_current()->pcb->fds;
   int fd = 2;
   if (!list_empty(fds)) {
