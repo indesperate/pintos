@@ -69,26 +69,43 @@ pid_t process_execute(const char* file_name) {
 
   struct start_process_data* spd = malloc(sizeof(struct start_process_data));
 
+  if (spd == NULL) {
+    palloc_free_page(fn_copy);
+    return TID_ERROR;
+  }
+
   spd->cmd_line = fn_copy;
   spd->loaded = false;
   sema_init(&spd->load_sema, 0);
 
-  /* Create a new thread to execute FILE_NAME. */
-  char* thread_name = palloc_get_page(0);
   /* make thread name strip of args */
-  strlcpy(thread_name, file_name, strcspn(file_name, " ") + 1);
+  size_t thread_name_size = strcspn(file_name, " ") + 1;
+  char* thread_name = malloc(thread_name_size);
+
+  if (thread_name == NULL) {
+    free(spd);
+    palloc_free_page(fn_copy);
+    return TID_ERROR;
+  }
+
+  strlcpy(thread_name, file_name, thread_name_size);
+  /* Create a new thread to execute FILE_NAME. */
   tid = thread_create(thread_name, PRI_DEFAULT, start_process, spd);
-  palloc_free_page(thread_name);
 
   struct child_thread* child = find_child_process(tid);
   sema_down(&spd->load_sema);
+
+  /* free resources */
+  free(thread_name);
+  palloc_free_page(fn_copy);
+
   /* if child not loaded free the resource malloc in thread create */
   if (!spd->loaded) {
     list_remove(&child->elem);
     free(child);
-    return TID_ERROR;
+    tid = TID_ERROR;
   }
-  palloc_free_page(fn_copy);
+  free(spd);
   return tid;
 }
 
