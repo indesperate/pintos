@@ -438,7 +438,15 @@ static void sys_pt_create(struct intr_frame* f) {
   f->eax = pthread_execute(sfun, tfun, arg);
 }
 
-static void sys_pt_exit(struct intr_frame* f UNUSED) { pthread_exit(); }
+static void sys_pt_exit(struct intr_frame* f) {
+  pthread_exit();
+  if (is_main_thread(thread_current(), thread_current()->pcb)) {
+    f->eax = 0;
+    printf("%s: exit(%d)\n", thread_current()->pcb->process_name, 0);
+    process_exit();
+  }
+}
+
 static void sys_pt_join(struct intr_frame* f) {
   uint32_t* args = ((uint32_t*)f->esp);
   tid_t tid;
@@ -543,7 +551,7 @@ static void sys_sema_init(struct intr_frame* f) {
   };
   struct user_sema* u_sema = malloc(sizeof(struct user_sema));
   sema_init(&u_sema->sema, val);
-  if (u_sema == NULL) {
+  if (u_sema == NULL || val < 0) {
     f->eax = false;
     return;
   }
@@ -620,6 +628,8 @@ static void sys_sema_up(struct intr_frame* f) {
   f->eax = true;
 }
 
+static void sys_get_tid(struct intr_frame* f) { f->eax = thread_current()->tid; }
+
 void syscall_init(void) {
   intr_register_int(0x30, 3, INTR_ON, syscall_handler, "syscall");
   register_handler(SYS_HALT, sys_halt);
@@ -646,6 +656,7 @@ void syscall_init(void) {
   register_handler(SYS_SEMA_INIT, sys_sema_init);
   register_handler(SYS_SEMA_DOWN, sys_sema_down);
   register_handler(SYS_SEMA_UP, sys_sema_up);
+  register_handler(SYS_GET_TID, sys_get_tid);
   register_handler(SYS_MMAP, dump);
   register_handler(SYS_MUNMAP, dump);
   register_handler(SYS_CHDIR, dump);

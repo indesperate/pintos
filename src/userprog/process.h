@@ -75,6 +75,7 @@ struct process {
   struct process_cps_data* child_ptr; /* child ptr in parent */
   uint8_t* stack_begin;               /* stack start virtual address for allocate */
   struct lock thread_lock;            /* lock when access process data */
+  struct semaphore main_wait;         /* wait on main thread */
   /* syn utils */
   struct list locks; /* user locks */
   struct list semas; /* user semas */

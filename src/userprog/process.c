@@ -237,6 +237,7 @@ static void start_process(void* data) {
     t->pcb->stack_begin = PHYS_BASE;
     lock_init(&t->pcb->thread_lock);
     list_init(&t->pcb->pthreads);
+    sema_init(&t->pcb->main_wait, 0);
     /* sync utils */
     list_init(&t->pcb->locks);
     list_init(&t->pcb->semas);
@@ -374,6 +375,13 @@ void process_exit(void) {
     struct user_sema* sema = list_entry(e, struct user_sema, elem);
     e = list_next(e);
     free(sema);
+  }
+
+  struct list* pthreads = &cur->pcb->pthreads;
+  for (e = list_begin(pthreads); e != list_end(pthreads);) {
+    struct pthread_data* p = list_entry(e, struct pthread_data, elem);
+    e = list_next(e);
+    free(p);
   }
 
   /* Destroy the current process's page directory and switch back
@@ -924,15 +932,20 @@ static struct pthread_data* find_pthread_data(tid_t tid) {
    now, it does nothing. */
 tid_t pthread_join(tid_t tid) {
   struct thread* cur = thread_current();
+  if (tid == cur->pcb->main_thread->tid) {
+    sema_down(&cur->pcb->main_wait);
+    return tid;
+  }
   struct pthread_data* pd = find_pthread_data(tid);
   if (pd == NULL || pd->waited) {
     return TID_ERROR;
+  } else {
+    sema_down(&pd->wait_sema);
+    lock_acquire(&cur->pcb->thread_lock);
+    list_remove(&pd->elem);
+    lock_release(&cur->pcb->thread_lock);
+    free(pd);
   }
-  sema_down(&pd->wait_sema);
-  lock_acquire(&cur->pcb->thread_lock);
-  list_remove(&pd->elem);
-  lock_release(&cur->pcb->thread_lock);
-  free(pd);
   return tid;
 }
 
@@ -950,12 +963,13 @@ void pthread_exit(void) {
   struct thread* cur = thread_current();
   struct process* pcb = cur->pcb;
   if (is_main_thread(cur, pcb)) {
+    sema_up(&cur->pcb->main_wait);
     pthread_exit_main();
   } else {
     lock_acquire(&pcb->thread_lock);
     struct pthread_data* pd = find_pthread_data(cur->tid);
     /* remove page, stack page begin at stack - PGSIZE*/
-    pagedir_clear_page(pcb, pd->stack - PGSIZE);
+    pagedir_clear_page(pcb->pagedir, pd->stack - PGSIZE);
     lock_release(&pcb->thread_lock);
     /* up main thread wait sema */
     sema_up(&pd->wait_sema);
