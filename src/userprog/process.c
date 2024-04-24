@@ -23,7 +23,7 @@
 static thread_func start_process NO_RETURN;
 static thread_func start_pthread NO_RETURN;
 static bool load(const char* file_name, void (**eip)(void), void** esp);
-static struct child_thread* find_child_process(pid_t child_pid);
+static struct process_cps_data* find_child_process(pid_t child_pid);
 bool setup_thread(void (**eip)(void), void** esp);
 
 /* Initializes user programs in the system by ensuring the main
@@ -41,6 +41,9 @@ void userprog_init(void) {
      can come at any time and activate our pagedir */
   t->pcb = calloc(sizeof(struct process), 1);
   success = t->pcb != NULL;
+  t->pcb->main_thread = t;
+  list_init(&t->pcb->child_processes);
+  t->pcb->child_ptr = NULL;
 
   /* Kill the kernel if we did not succeed */
   ASSERT(success);
@@ -49,6 +52,7 @@ void userprog_init(void) {
 struct start_process_data {
   char* cmd_line;
   struct semaphore load_sema;
+  struct process_cps_data* child_ptr;
   bool loaded;
 };
 
@@ -57,20 +61,20 @@ struct start_process_data {
    before process_execute() returns.  Returns the new process's
    process id, or TID_ERROR if the thread cannot be created. */
 pid_t process_execute(const char* file_name) {
-  char* fn_copy;
   tid_t tid;
 
   /* Make a copy of FILE_NAME.
      Otherwise there's a race between the caller and load(). */
-  fn_copy = palloc_get_page(0);
+  size_t fn_copy_size = strnlen(file_name, PGSIZE) + 1;
+  char* fn_copy = malloc(fn_copy_size);
   if (fn_copy == NULL)
     return TID_ERROR;
-  strlcpy(fn_copy, file_name, PGSIZE);
+  strlcpy(fn_copy, file_name, fn_copy_size);
 
   struct start_process_data* spd = malloc(sizeof(struct start_process_data));
 
   if (spd == NULL) {
-    palloc_free_page(fn_copy);
+    free(fn_copy);
     return TID_ERROR;
   }
 
@@ -84,26 +88,42 @@ pid_t process_execute(const char* file_name) {
 
   if (thread_name == NULL) {
     free(spd);
-    palloc_free_page(fn_copy);
+    free(fn_copy);
     return TID_ERROR;
   }
 
   strlcpy(thread_name, file_name, thread_name_size);
+
+  /* alloc child process structure*/
+  struct process_cps_data* child_ptr = malloc(sizeof(struct process_cps_data));
+  if (child_ptr == NULL) {
+    free(thread_name);
+    free(spd);
+    free(fn_copy);
+    return TID_ERROR;
+  }
+  /* init */
+  child_ptr->exit_status = -1;
+  child_ptr->wait_called = false;
+  sema_init(&child_ptr->wait_sema, 0);
+  spd->child_ptr = child_ptr;
+
   /* Create a new thread to execute FILE_NAME. */
   tid = thread_create(thread_name, PRI_DEFAULT, start_process, spd);
 
-  struct child_thread* child = find_child_process(tid);
   sema_down(&spd->load_sema);
 
   /* free resources */
   free(thread_name);
-  palloc_free_page(fn_copy);
+  free(fn_copy);
 
   /* if child not loaded free the resource malloc in thread create */
   if (!spd->loaded) {
-    list_remove(&child->elem);
-    free(child);
+    free(child_ptr);
     tid = TID_ERROR;
+  } else {
+    child_ptr->pid = tid;
+    list_push_back(&thread_current()->pcb->child_processes, &child_ptr->elem);
   }
   free(spd);
   return tid;
@@ -200,6 +220,12 @@ static void start_process(void* data) {
 
     // Continue initializing the PCB as normal
     t->pcb->main_thread = t;
+    /* init pcb */
+    list_init(&t->pcb->fds);
+    list_init(&t->pcb->child_processes);
+    t->pcb->child_ptr = spd->child_ptr;
+    t->pcb->exec_file = NULL;
+
     strlcpy(t->pcb->process_name, t->name, sizeof t->name);
   }
 
@@ -236,11 +262,8 @@ static void start_process(void* data) {
 
   /* Clean up. Exit on failure or jump to userspace */
   if (!success) {
-    sema_up(&t->child_ptr->wait_sema);
     thread_exit();
   }
-
-  list_init(&t->pcb->fds);
 
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
@@ -253,12 +276,12 @@ static void start_process(void* data) {
 }
 
 /* find the child process belong to child_pid */
-static struct child_thread* find_child_process(pid_t child_pid) {
+static struct process_cps_data* find_child_process(pid_t child_pid) {
   struct list_elem* e;
-  struct list* children = &thread_current()->children;
+  struct list* children = &thread_current()->pcb->child_processes;
   for (e = list_begin(children); e != list_end(children); e = list_next(e)) {
-    struct child_thread* f = list_entry(e, struct child_thread, elem);
-    if (f->tid == child_pid) {
+    struct process_cps_data* f = list_entry(e, struct process_cps_data, elem);
+    if (f->pid == child_pid) {
       return f;
     }
   }
@@ -275,7 +298,7 @@ static struct child_thread* find_child_process(pid_t child_pid) {
    This function will be implemented in problem 2-2.  For now, it
    does nothing. */
 int process_wait(pid_t child_pid) {
-  struct child_thread* child = find_child_process(child_pid);
+  struct process_cps_data* child = find_child_process(child_pid);
   /* pid not valid or already called */
   if (!child || child->wait_called) {
     return -1;
@@ -313,6 +336,14 @@ void process_exit(void) {
   /* free file executable resource */
   file_close(cur->pcb->exec_file);
 
+  /* free zombie process resource */
+  struct list* children = &cur->pcb->child_processes;
+  for (e = list_begin(children); e != list_end(children);) {
+    struct process_cps_data* pcd = list_entry(e, struct process_cps_data, elem);
+    e = list_next(e);
+    free(pcd);
+  }
+
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
   pd = cur->pcb->pagedir;
@@ -329,6 +360,8 @@ void process_exit(void) {
     pagedir_destroy(pd);
   }
 
+  struct process_cps_data* child_ptr = cur->pcb->child_ptr;
+
   /* Free the PCB of this process and kill this thread
      Avoid race where PCB is freed before t->pcb is set to NULL
      If this happens, then an unfortuantely timed timer interrupt
@@ -337,7 +370,7 @@ void process_exit(void) {
   cur->pcb = NULL;
   free(pcb_to_free);
 
-  sema_up(&cur->child_ptr->wait_sema);
+  sema_up(&child_ptr->wait_sema);
   thread_exit();
 }
 

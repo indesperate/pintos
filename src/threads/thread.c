@@ -211,15 +211,6 @@ tid_t thread_create(const char* name, int priority, thread_func* function, void*
   sf->eip = switch_entry;
   sf->ebp = 0;
 
-  /* child_thread for parent */
-  struct child_thread* child = malloc(sizeof(struct child_thread));
-  child->exit_status = -1;
-  child->tid = tid;
-  child->wait_called = false;
-  sema_init(&child->wait_sema, 0);
-  list_push_back(&thread_current()->children, &child->elem);
-  t->child_ptr = child;
-
   /* Add to run queue. */
   thread_unblock(t);
 
@@ -486,9 +477,6 @@ static void init_thread(struct thread* t, const char* name, int priority) {
   t->priority = priority;
   t->pcb = NULL;
   t->magic = THREAD_MAGIC;
-  /* child userprog util */
-  list_init(&t->children);
-  t->child_ptr = NULL;
   /* slepp util */
   t->sleep_ticks = 0;
   /* priority util */
@@ -594,15 +582,6 @@ void thread_switch_tail(struct thread* prev) {
      palloc().) */
   if (prev != NULL && prev->status == THREAD_DYING && prev != initial_thread) {
     ASSERT(prev != cur);
-    /* free standalone child state */
-    struct list_elem* e;
-    struct list* children = &prev->children;
-    for (e = list_begin(children); e != list_end(children);) {
-      struct child_thread* child = list_entry(e, struct child_thread, elem);
-      e = list_next(e);
-      /* TODO: find a way to deal with zombie thread, running but not waited, it may still use child_ptr*/
-      free(child);
-    }
     palloc_free_page(prev);
   }
 }

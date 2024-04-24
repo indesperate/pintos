@@ -23,6 +23,16 @@ struct file_descriptor {
   struct list_elem elem;
 };
 
+/* porcess child parent shared data */
+struct process_cps_data {
+  pid_t pid;             /* children tid */
+  struct list_elem elem; /* list elem */
+  /* only for userprog processes */
+  struct semaphore wait_sema; /* semaphore to wait child process*/
+  int exit_status;            /* exit status */
+  bool wait_called;           /* if already called wait*/
+};
+
 /* The process control block for a given process. Since
    there can be multiple threads per process, we need a separate
    PCB from the TCB. All TCBs in a process will have a pointer
@@ -30,11 +40,13 @@ struct file_descriptor {
    of the process, which is `special`. */
 struct process {
   /* Owned by process.c. */
-  uint32_t* pagedir;          /* Page directory. */
-  char process_name[16];      /* Name of the main thread */
-  struct thread* main_thread; /* Pointer to main thread */
-  struct list fds;            /* file descriptors list*/
-  struct file* exec_file;     /* executable file resource */
+  uint32_t* pagedir;                  /* Page directory. */
+  char process_name[16];              /* Name of the main thread */
+  struct thread* main_thread;         /* Pointer to main thread */
+  struct list fds;                    /* file descriptors list*/
+  struct file* exec_file;             /* executable file resource */
+  struct list child_processes;        /* process children list */
+  struct process_cps_data* child_ptr; /* child ptr in parent */
 };
 
 void userprog_init(void);
