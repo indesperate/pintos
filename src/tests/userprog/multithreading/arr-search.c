@@ -95,15 +95,15 @@ void test_main(void) {
     arr[i] = ARR_SIZE - i - 1;
 
   // Spawn threads to search for elements in the array
-  for (int i = 0; i < 17; i++)
+  for (int i = 0; i < ARR_SIZE; i++)
     search_and_check(i);
 
-  // // Spawn threads to search for elements not in the array
-  // for (int i = -ARR_SIZE; i < 0; i++)
-  //   search_and_check(i);
+  // Spawn threads to search for elements not in the array
+  for (int i = -ARR_SIZE; i < 0; i++)
+    search_and_check(i);
 
-  // for (int i = ARR_SIZE; i < ARR_SIZE * 2; i++)
-  //   search_and_check(i);
+  for (int i = ARR_SIZE; i < ARR_SIZE * 2; i++)
+    search_and_check(i);
 
   msg("Main finished");
 }

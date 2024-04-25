@@ -442,6 +442,9 @@ static void sys_pt_exit(struct intr_frame* f) {
   pthread_exit();
   if (is_main_thread(thread_current(), thread_current()->pcb)) {
     f->eax = 0;
+    if (thread_current()->tid == -1) {
+      thread_exit();
+    }
     printf("%s: exit(%d)\n", thread_current()->pcb->process_name, 0);
     process_exit();
   }

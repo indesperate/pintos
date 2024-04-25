@@ -333,6 +333,11 @@ void process_exit(void) {
   struct thread* cur = thread_current();
   uint32_t* pd;
 
+  if (!is_main_thread(cur, cur->pcb)) {
+    cur->pcb->main_thread->tid = -1;
+    cur->pcb->main_thread = cur;
+  }
+
   pthread_exit_main();
 
   /* If this thread does not have a PCB, don't worry */
@@ -998,17 +1003,18 @@ void pthread_exit(void) {
    now, it does nothing. */
 void pthread_exit_main(void) {
   struct thread* cur = thread_current();
-  ASSERT(is_main_thread(cur, cur->pcb));
   struct list_elem* e;
   struct list* children = &cur->pcb->pthreads;
   for (e = list_begin(children); e != list_end(children);) {
     struct pthread_data* p = list_entry(e, struct pthread_data, elem);
     e = list_next(e);
-    ASSERT(p->waited == false);
-    sema_down(&p->wait_sema);
-    lock_acquire(&cur->pcb->thread_lock);
-    list_remove(&p->elem);
-    lock_release(&cur->pcb->thread_lock);
-    free(p);
+    if (p->tid != cur->tid) {
+      ASSERT(p->waited == false);
+      sema_down(&p->wait_sema);
+      lock_acquire(&cur->pcb->thread_lock);
+      list_remove(&p->elem);
+      lock_release(&cur->pcb->thread_lock);
+      free(p);
+    }
   }
 }
