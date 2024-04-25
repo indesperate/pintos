@@ -233,8 +233,7 @@ static void start_process(void* data) {
     list_init(&t->pcb->child_processes);
     t->pcb->child_ptr = spd->child_ptr;
     t->pcb->exec_file = NULL;
-    /* stack allocate */
-    t->pcb->stack_begin = PHYS_BASE;
+    /* pthread utils */
     lock_init(&t->pcb->thread_lock);
     list_init(&t->pcb->pthreads);
     sema_init(&t->pcb->main_wait, 0);
@@ -742,14 +741,15 @@ pid_t get_pid(struct process* p) { return (pid_t)p->main_thread->tid; }
 
 /* allocate stack for new pthread */
 static uint8_t* allocate_stack(void) {
-  /* TODO: may reuse exit thread stack virutal address */
   struct process* pcb = thread_current()->pcb;
 
-  uint8_t* stack;
-  lock_acquire(&pcb->thread_lock);
-  pcb->stack_begin -= PGSIZE;
-  stack = pcb->stack_begin;
-  lock_release(&pcb->thread_lock);
+  uint8_t* stack = PHYS_BASE - PGSIZE;
+
+  /* allocate new thread at end of last thread */
+  if (!list_empty(&pcb->pthreads)) {
+    struct pthread_data* end = list_entry(list_back(&pcb->pthreads), struct pthread_data, elem);
+    stack = end->stack - PGSIZE;
+  }
 
   return stack;
 }
@@ -808,10 +808,12 @@ static void fill_stub_args(void** esp, pthread_fun tf, void* arg) {
 }
 
 struct start_pthread_data {
-  void (*eip)(void);
-  void* esp;
+  stub_fun sf;
+  pthread_fun tf;
+  void* arg;
   struct pthread_data* pd;
   struct semaphore wait_sema;
+  bool success;
 };
 
 tid_t pthread_execute(stub_fun sf, pthread_fun tf, void* arg) {
@@ -828,34 +830,32 @@ tid_t pthread_execute(stub_fun sf, pthread_fun tf, void* arg) {
     return TID_ERROR;
   }
   /* setup spt eip esp and pd */
-  if (!setup_thread(&spt->eip, &spt->esp, sf)) {
-    free(pd);
-    free(spt);
-    return TID_ERROR;
-  }
   spt->pd = pd;
+  spt->arg = arg;
+  spt->sf = sf;
+  spt->tf = tf;
   sema_init(&spt->wait_sema, 0);
+  spt->success = false;
   /* init pd information */
-  pd->stack = spt->esp;
+  pd->stack = NULL;
+  pd->tid = -1;
   pd->waited = false;
   sema_init(&pd->wait_sema, 0);
-  /* fill in esp stack */
-  fill_stub_args(&spt->esp, tf, arg);
-  /* make copy of esp bacause pd may be free by child */
-  void* esp = spt->esp;
   /* create thread */
   tid_t pthread_id = thread_create(pcb->process_name, PRI_DEFAULT, start_pthread, spt);
   /* handle create error */
   if (pthread_id == TID_ERROR) {
-    palloc_free_page(pagedir_get_page(pcb->pagedir, esp - PGSIZE));
-    pagedir_clear_page(pcb->pagedir, esp - PGSIZE);
     free(spt);
     free(pd);
     return TID_ERROR;
   }
+  /* wait for thread init */
   sema_down(&spt->wait_sema);
+  if (!spt->success) {
+    free(pd);
+    pthread_id = TID_ERROR;
+  }
   free(spt);
-  /* free spt in pthread children */
   return pthread_id;
 }
 
@@ -882,14 +882,27 @@ static void start_pthread(void* data) {
   if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
-  if_.eip = spt->eip;
-  if_.esp = spt->esp;
 
-  /* set pd data */
-  spt->pd->tid = cur->tid;
+  struct pthread_data* pd = spt->pd;
+  pd->tid = cur->tid;
+
+  /* setup thread stack, should use a lock to avoid race conditon */
   lock_acquire(&pcb->thread_lock);
-  list_push_back(&pcb->pthreads, &spt->pd->elem);
+  spt->success = setup_thread(&if_.eip, &if_.esp, spt->sf);
+  if (spt->success) {
+    pd->stack = if_.esp;
+    list_push_back(&pcb->pthreads, &pd->elem);
+  }
   lock_release(&pcb->thread_lock);
+
+  /* setup failed */
+  if (!spt->success) {
+    sema_up(&spt->wait_sema);
+    thread_exit();
+  }
+
+  /* fill in esp stack */
+  fill_stub_args(&if_.esp, spt->tf, spt->arg);
 
   sema_up(&spt->wait_sema);
 
