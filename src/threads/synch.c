@@ -216,7 +216,7 @@ void lock_acquire(struct lock* lock) {
 
   int success = lock_try_acquire(lock);
   if (!success) {
-    if (t->priority > lock->holder->priority) {
+    if (lock->holder && t->priority > lock->holder->priority) {
       thread_donate(t, lock);
       /* set wait lock */
       t->wait_lock = lock;

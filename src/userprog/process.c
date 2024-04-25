@@ -810,6 +810,8 @@ static void fill_stub_args(void** esp, pthread_fun tf, void* arg) {
 struct start_pthread_data {
   void (*eip)(void);
   void* esp;
+  struct pthread_data* pd;
+  struct semaphore wait_sema;
 };
 
 tid_t pthread_execute(stub_fun sf, pthread_fun tf, void* arg) {
@@ -825,13 +827,23 @@ tid_t pthread_execute(stub_fun sf, pthread_fun tf, void* arg) {
     free(spt);
     return TID_ERROR;
   }
+  /* setup spt eip esp and pd */
   if (!setup_thread(&spt->eip, &spt->esp, sf)) {
     free(pd);
     free(spt);
     return TID_ERROR;
   }
-  void* esp = spt->esp;
+  spt->pd = pd;
+  sema_init(&spt->wait_sema, 0);
+  /* init pd information */
+  pd->stack = spt->esp;
+  pd->waited = false;
+  sema_init(&pd->wait_sema, 0);
+  /* fill in esp stack */
   fill_stub_args(&spt->esp, tf, arg);
+  /* make copy of esp bacause pd may be free by child */
+  void* esp = spt->esp;
+  /* create thread */
   tid_t pthread_id = thread_create(pcb->process_name, PRI_DEFAULT, start_pthread, spt);
   /* handle create error */
   if (pthread_id == TID_ERROR) {
@@ -841,13 +853,8 @@ tid_t pthread_execute(stub_fun sf, pthread_fun tf, void* arg) {
     free(pd);
     return TID_ERROR;
   }
-  pd->tid = pthread_id;
-  pd->stack = esp;
-  sema_init(&pd->wait_sema, 0);
-  pd->waited = false;
-  lock_acquire(&pcb->thread_lock);
-  list_push_back(&pcb->pthreads, &pd->elem);
-  lock_release(&pcb->thread_lock);
+  sema_down(&spt->wait_sema);
+  free(spt);
   /* free spt in pthread children */
   return pthread_id;
 }
@@ -863,7 +870,8 @@ static void start_pthread(void* data) {
   struct intr_frame if_;
 
   /* Allocate process control block */
-  struct process* pcb = thread_current()->pcb;
+  struct thread* cur = thread_current();
+  struct process* pcb = cur->pcb;
 
   /* activate pcb */
   process_activate();
@@ -877,7 +885,13 @@ static void start_pthread(void* data) {
   if_.eip = spt->eip;
   if_.esp = spt->esp;
 
-  free(spt);
+  /* set pd data */
+  spt->pd->tid = cur->tid;
+  lock_acquire(&pcb->thread_lock);
+  list_push_back(&pcb->pthreads, &spt->pd->elem);
+  lock_release(&pcb->thread_lock);
+
+  sema_up(&spt->wait_sema);
 
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
@@ -950,6 +964,7 @@ void pthread_exit(void) {
   } else {
     lock_acquire(&pcb->thread_lock);
     struct pthread_data* pd = find_pthread_data(cur->tid);
+    ASSERT(pd != NULL);
     /* remove page, stack page begin at stack - PGSIZE*/
     palloc_free_page(pagedir_get_page(pcb->pagedir, pd->stack - PGSIZE));
     pagedir_clear_page(pcb->pagedir, pd->stack - PGSIZE);
