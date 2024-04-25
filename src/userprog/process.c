@@ -973,6 +973,7 @@ void pthread_exit(void) {
     lock_acquire(&pcb->thread_lock);
     struct pthread_data* pd = find_pthread_data(cur->tid);
     /* remove page, stack page begin at stack - PGSIZE*/
+    palloc_free_page(pagedir_get_page(pcb->pagedir, pd->stack - PGSIZE));
     pagedir_clear_page(pcb->pagedir, pd->stack - PGSIZE);
     lock_release(&pcb->thread_lock);
     /* up main thread wait sema */
