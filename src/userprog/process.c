@@ -791,51 +791,6 @@ static bool setup_thread(void (**eip)(void), void** esp, stub_fun sf) {
    should be similar to process_execute (). For now, it does nothing.
    */
 
-struct start_pthread_data {
-  stub_fun sf;
-  pthread_fun tf;
-  void* arg;
-  struct pthread_data* pd;
-  struct semaphore create_sema;
-  bool created;
-};
-
-tid_t pthread_execute(stub_fun sf, pthread_fun tf, void* arg) {
-  struct process* pcb = thread_current()->pcb;
-  /* data pass to start pthread */
-  struct start_pthread_data* spt = malloc(sizeof(struct start_pthread_data));
-  if (spt == NULL) {
-    return TID_ERROR;
-  }
-  /* pthread data in pcb block pthread list */
-  struct pthread_data* pd = malloc(sizeof(struct pthread_data));
-  if (pd == NULL) {
-    free(spt);
-    return TID_ERROR;
-  }
-  spt->sf = sf;
-  spt->tf = tf;
-  spt->arg = arg;
-  spt->pd = pd;
-  spt->created = false;
-  sema_init(&spt->create_sema, 0);
-  tid_t pthread_id = thread_create(pcb->process_name, PRI_DEFAULT, start_pthread, spt);
-  /* handle create error */
-  if (pthread_id == TID_ERROR) {
-    free(spt);
-    free(pd);
-    return TID_ERROR;
-  }
-
-  sema_down(&spt->create_sema);
-  if (!spt->created) {
-    pthread_id = -1;
-    free(pd);
-  }
-  free(spt);
-  return pthread_id;
-}
-
 /* fill pthread stub fun args */
 static void fill_stub_args(void** esp, pthread_fun tf, void* arg) {
   uint8_t* stack = *esp;
@@ -852,6 +807,51 @@ static void fill_stub_args(void** esp, pthread_fun tf, void* arg) {
   *((uint32_t*)stack) = (uint32_t)arg;
 }
 
+struct start_pthread_data {
+  void (*eip)(void);
+  void* esp;
+};
+
+tid_t pthread_execute(stub_fun sf, pthread_fun tf, void* arg) {
+  struct process* pcb = thread_current()->pcb;
+  /* data pass to start pthread */
+  struct start_pthread_data* spt = malloc(sizeof(struct start_pthread_data));
+  if (spt == NULL) {
+    return TID_ERROR;
+  }
+  /* pthread data in pcb block pthread list */
+  struct pthread_data* pd = malloc(sizeof(struct pthread_data));
+  if (pd == NULL) {
+    free(spt);
+    return TID_ERROR;
+  }
+  if (!setup_thread(&spt->eip, &spt->esp, sf)) {
+    free(pd);
+    free(spt);
+    return TID_ERROR;
+  }
+  void* esp = spt->esp;
+  fill_stub_args(&spt->esp, tf, arg);
+  tid_t pthread_id = thread_create(pcb->process_name, PRI_DEFAULT, start_pthread, spt);
+  /* handle create error */
+  if (pthread_id == TID_ERROR) {
+    palloc_free_page(pagedir_get_page(pcb->pagedir, esp - PGSIZE));
+    pagedir_clear_page(pcb->pagedir, esp - PGSIZE);
+    free(spt);
+    free(pd);
+    return TID_ERROR;
+  }
+  pd->tid = pthread_id;
+  pd->stack = esp;
+  sema_init(&pd->wait_sema, 0);
+  pd->waited = false;
+  lock_acquire(&pcb->thread_lock);
+  list_push_back(&pcb->pthreads, &pd->elem);
+  lock_release(&pcb->thread_lock);
+  /* free spt in pthread children */
+  return pthread_id;
+}
+
 /* A thread function that creates a new user thread and starts it
    running. Responsible for adding itself to the list of threads in
    the PCB.
@@ -861,7 +861,6 @@ static void fill_stub_args(void** esp, pthread_fun tf, void* arg) {
 static void start_pthread(void* data) {
   struct start_pthread_data* spt = data;
   struct intr_frame if_;
-  bool success;
 
   /* Allocate process control block */
   struct process* pcb = thread_current()->pcb;
@@ -875,31 +874,10 @@ static void start_pthread(void* data) {
   if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
-  success = setup_thread(&if_.eip, &if_.esp, spt->sf);
-  /* save stack begin */
-  spt->pd->stack = if_.esp;
+  if_.eip = spt->eip;
+  if_.esp = spt->esp;
 
-  /*  fill user stack */
-  fill_stub_args(&if_.esp, spt->tf, spt->arg);
-
-  if (!success) {
-    spt->created = false;
-    /* tell parent fail */
-    sema_up(&spt->create_sema);
-    thread_exit();
-  } else {
-    /* init pd data */
-    spt->pd->tid = thread_current()->tid;
-    spt->pd->waited = false;
-    sema_init(&spt->pd->wait_sema, 0);
-    /* use lock avoid multi thread change pthreads */
-    lock_acquire(&pcb->thread_lock);
-    list_push_back(&pcb->pthreads, &spt->pd->elem);
-    lock_release(&pcb->thread_lock);
-    /* tell parent init done */
-    spt->created = true;
-    sema_up(&spt->create_sema);
-  }
+  free(spt);
 
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
