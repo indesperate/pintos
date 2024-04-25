@@ -932,6 +932,10 @@ static struct pthread_data* find_pthread_data(tid_t tid) {
    now, it does nothing. */
 tid_t pthread_join(tid_t tid) {
   struct thread* cur = thread_current();
+  /* can't join it self */
+  if (cur->tid == tid) {
+    return -1;
+  }
   if (tid == cur->pcb->main_thread->tid) {
     sema_down(&cur->pcb->main_wait);
     return tid;
