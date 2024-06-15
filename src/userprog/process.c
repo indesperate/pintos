@@ -63,45 +63,41 @@ struct start_process_data {
 pid_t process_execute(const char* file_name) {
   tid_t tid;
 
+  /* all resources */
+  char* fn_copy = NULL;
+  struct start_process_data* spd = NULL;
+  char* thread_name = NULL;
+  struct process_cps_data* child_ptr = NULL;
+
   /* Make a copy of FILE_NAME.
      Otherwise there's a race between the caller and load(). */
   size_t fn_copy_size = strnlen(file_name, PGSIZE) + 1;
-  char* fn_copy = malloc(fn_copy_size);
+  fn_copy = malloc(fn_copy_size);
   if (fn_copy == NULL)
-    return TID_ERROR;
+    goto bad;
   strlcpy(fn_copy, file_name, fn_copy_size);
 
-  struct start_process_data* spd = malloc(sizeof(struct start_process_data));
-
-  if (spd == NULL) {
-    free(fn_copy);
-    return TID_ERROR;
-  }
-
+  /* start process data */
+  spd = malloc(sizeof(struct start_process_data));
+  if (spd == NULL)
+    goto bad;
   spd->cmd_line = fn_copy;
   spd->loaded = false;
   sema_init(&spd->load_sema, 0);
 
   /* make thread name strip of args */
   size_t thread_name_size = strcspn(file_name, " ") + 1;
-  char* thread_name = malloc(thread_name_size);
-
-  if (thread_name == NULL) {
-    free(spd);
-    free(fn_copy);
-    return TID_ERROR;
-  }
+  thread_name = malloc(thread_name_size);
+  if (thread_name == NULL)
+    goto bad;
 
   strlcpy(thread_name, file_name, thread_name_size);
 
   /* alloc child process structure*/
-  struct process_cps_data* child_ptr = malloc(sizeof(struct process_cps_data));
-  if (child_ptr == NULL) {
-    free(thread_name);
-    free(spd);
-    free(fn_copy);
-    return TID_ERROR;
-  }
+  child_ptr = malloc(sizeof(struct process_cps_data));
+  if (child_ptr == NULL)
+    goto bad;
+
   /* init */
   child_ptr->exit_status = -1;
   child_ptr->wait_called = false;
@@ -110,31 +106,31 @@ pid_t process_execute(const char* file_name) {
 
   /* Create a new thread to execute FILE_NAME. */
   tid = thread_create(thread_name, PRI_DEFAULT, start_process, spd);
-
-  if (tid == TID_ERROR) {
-    free(spd);
-    free(fn_copy);
-    free(thread_name);
-    free(child_ptr);
-    return TID_ERROR;
-  }
+  if (tid == TID_ERROR)
+    goto bad;
 
   sema_down(&spd->load_sema);
+  /* if child not loaded free the resource malloc in thread create */
+  if (!spd->loaded)
+    goto bad;
+  child_ptr->pid = tid;
+  list_push_back(&thread_current()->pcb->child_processes, &child_ptr->elem);
 
   /* free resources */
   free(thread_name);
   free(fn_copy);
-
-  /* if child not loaded free the resource malloc in thread create */
-  if (!spd->loaded) {
-    free(child_ptr);
-    tid = TID_ERROR;
-  } else {
-    child_ptr->pid = tid;
-    list_push_back(&thread_current()->pcb->child_processes, &child_ptr->elem);
-  }
   free(spd);
   return tid;
+bad:
+  if (spd != NULL)
+    free(spd);
+  if (fn_copy != NULL)
+    free(fn_copy);
+  if (thread_name != NULL)
+    free(thread_name);
+  if (child_ptr != NULL)
+    free(child_ptr);
+  return TID_ERROR;
 }
 
 /* A function get args number */
@@ -822,18 +818,20 @@ struct start_pthread_data {
 };
 
 tid_t pthread_execute(stub_fun sf, pthread_fun tf, void* arg) {
+
+  /* all resources */
+  struct start_pthread_data* spt = NULL;
+  struct pthread_data* pd = NULL;
+
   struct process* pcb = thread_current()->pcb;
   /* data pass to start pthread */
-  struct start_pthread_data* spt = malloc(sizeof(struct start_pthread_data));
-  if (spt == NULL) {
-    return TID_ERROR;
-  }
+  spt = malloc(sizeof(struct start_pthread_data));
+  if (spt == NULL)
+    goto bad;
   /* pthread data in pcb block pthread list */
-  struct pthread_data* pd = malloc(sizeof(struct pthread_data));
-  if (pd == NULL) {
-    free(spt);
-    return TID_ERROR;
-  }
+  pd = malloc(sizeof(struct pthread_data));
+  if (pd == NULL)
+    goto bad;
   /* setup spt eip esp and pd */
   spt->pd = pd;
   spt->arg = arg;
@@ -849,19 +847,20 @@ tid_t pthread_execute(stub_fun sf, pthread_fun tf, void* arg) {
   /* create thread */
   tid_t pthread_id = thread_create(pcb->process_name, PRI_DEFAULT, start_pthread, spt);
   /* handle create error */
-  if (pthread_id == TID_ERROR) {
-    free(spt);
-    free(pd);
-    return TID_ERROR;
-  }
+  if (pthread_id == TID_ERROR)
+    goto bad;
   /* wait for thread init */
   sema_down(&spt->wait_sema);
-  if (!spt->success) {
-    free(pd);
-    pthread_id = TID_ERROR;
-  }
+  if (!spt->success)
+    goto bad;
   free(spt);
   return pthread_id;
+bad:
+  if (spt != NULL)
+    free(spt);
+  if (pd != NULL)
+    free(pd);
+  return TID_ERROR;
 }
 
 /* A thread function that creates a new user thread and starts it
