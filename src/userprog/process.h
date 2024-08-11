@@ -68,6 +68,7 @@ struct process {
   struct thread* main_thread; /* Pointer to main thread */
   /* userprog utils */
   struct list fds;             /* file descriptors list*/
+  struct lock fds_lock;        /* access fds lock */
   struct file* exec_file;      /* executable file resource */
   struct list child_processes; /* process children list */
   /* pthread utils */

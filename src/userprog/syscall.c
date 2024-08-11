@@ -282,7 +282,9 @@ static void sys_open(struct intr_frame* f) {
   }
   fdp->fd = fd;
   fdp->file = open_file;
+  lock_acquire(&thread_current()->pcb->fds_lock);
   list_push_back(fds, &fdp->elem);
+  lock_release(&thread_current()->pcb->fds_lock);
   f->eax = fd;
 }
 
@@ -291,14 +293,17 @@ static struct file_descriptor* find_fd(int fd) {
   if (fd == STDIN_FILENO || fd == STDOUT_FILENO) {
     return NULL;
   }
+  lock_acquire(&thread_current()->pcb->fds_lock);
   struct list_elem* e;
   struct list* fds = &thread_current()->pcb->fds;
   for (e = list_begin(fds); e != list_end(fds); e = list_next(e)) {
     struct file_descriptor* f = list_entry(e, struct file_descriptor, elem);
     if (f->fd == fd) {
+      lock_release(&thread_current()->pcb->fds_lock);
       return f;
     }
   }
+  lock_release(&thread_current()->pcb->fds_lock);
   return NULL;
 }
 
@@ -326,7 +331,9 @@ static void sys_close(struct intr_frame* f) {
   lock_acquire(&fs_lock);
   file_close(fdp->file);
   lock_release(&fs_lock);
+  lock_acquire(&thread_current()->pcb->fds_lock);
   list_remove(&fdp->elem);
+  lock_release(&thread_current()->pcb->fds_lock);
   free(fdp);
 }
 static void sys_read(struct intr_frame* f) {
@@ -355,9 +362,7 @@ static void sys_read(struct intr_frame* f) {
       error_exit(f, -1);
     }
     /* buffer write */
-    lock_acquire(&fs_lock);
     num_read += file_read(fdp->file, buffer, size);
-    lock_release(&fs_lock);
   }
   f->eax = num_read;
   return;
@@ -383,9 +388,7 @@ static void sys_write(struct intr_frame* f) {
       error_exit(f, -1);
     }
     /* buffer write */
-    lock_acquire(&fs_lock);
     num_writen += file_write(fdp->file, buffer, size);
-    lock_release(&fs_lock);
   }
   f->eax = num_writen;
   return;
@@ -401,9 +404,7 @@ static void sys_seek(struct intr_frame* f) {
   if (!fdp) {
     error_exit(f, -1);
   }
-  lock_acquire(&fs_lock);
   file_seek(fdp->file, position);
-  lock_release(&fs_lock);
 }
 
 static void sys_tell(struct intr_frame* f) {

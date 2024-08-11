@@ -231,6 +231,7 @@ static void start_process(void* data) {
     t->pcb->exec_file = NULL;
     /* pthread utils */
     lock_init(&t->pcb->thread_lock);
+    lock_init(&t->pcb->fds_lock);
     list_init(&t->pcb->pthreads);
     sema_init(&t->pcb->main_wait, 0);
     /* sync utils */
