@@ -22,6 +22,7 @@ typedef void (*stub_fun)(pthread_fun, void*);
 
 struct file_descriptor {
   int fd;
+  struct lock lock;
   struct file* file;
   struct list_elem elem;
 };

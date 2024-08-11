@@ -235,9 +235,7 @@ static void sys_create(struct intr_frame* f) {
   if (!strcmp(file, "")) {
     error_exit(f, -1);
   }
-  lock_acquire(&fs_lock);
   f->eax = filesys_create(file, initial_size);
-  lock_release(&fs_lock);
 }
 
 static void sys_remove(struct intr_frame* f) {
@@ -248,9 +246,7 @@ static void sys_remove(struct intr_frame* f) {
   if (!strcmp(file, "")) {
     error_exit(f, -1);
   }
-  lock_acquire(&fs_lock);
   f->eax = filesys_remove(file);
-  lock_release(&fs_lock);
 }
 
 static void sys_open(struct intr_frame* f) {
@@ -258,19 +254,18 @@ static void sys_open(struct intr_frame* f) {
   const char* file;
   check_read_or_exit(f, (uint8_t*)&file, (uint8_t*)&args[1]);
   check_str(f, (uint8_t*)file);
-  lock_acquire(&fs_lock);
+  lock_acquire(&thread_current()->pcb->fds_lock);
   struct file* open_file = filesys_open(file);
-  lock_release(&fs_lock);
   if (!open_file) {
     f->eax = -1;
+    lock_release(&thread_current()->pcb->fds_lock);
     return;
   }
   /* set fds */
   struct file_descriptor* fdp = malloc(sizeof(struct file_descriptor));
   if (fdp == NULL) {
-    lock_acquire(&fs_lock);
     file_close(open_file);
-    lock_release(&fs_lock);
+    lock_release(&thread_current()->pcb->fds_lock);
     f->eax = -1;
     return;
   }
@@ -282,7 +277,7 @@ static void sys_open(struct intr_frame* f) {
   }
   fdp->fd = fd;
   fdp->file = open_file;
-  lock_acquire(&thread_current()->pcb->fds_lock);
+  lock_init(&fdp->lock);
   list_push_back(fds, &fdp->elem);
   lock_release(&thread_current()->pcb->fds_lock);
   f->eax = fd;
@@ -315,9 +310,9 @@ static void sys_filesize(struct intr_frame* f) {
   if (!fdp) {
     f->eax = -1;
   }
-  lock_acquire(&fs_lock);
+  lock_acquire(&fdp->lock);
   f->eax = file_length(fdp->file);
-  lock_release(&fs_lock);
+  lock_release(&fdp->lock);
 }
 
 static void sys_close(struct intr_frame* f) {
@@ -328,10 +323,8 @@ static void sys_close(struct intr_frame* f) {
   if (!fdp) {
     error_exit(f, -1);
   }
-  lock_acquire(&fs_lock);
-  file_close(fdp->file);
-  lock_release(&fs_lock);
   lock_acquire(&thread_current()->pcb->fds_lock);
+  file_close(fdp->file);
   list_remove(&fdp->elem);
   lock_release(&thread_current()->pcb->fds_lock);
   free(fdp);
@@ -362,7 +355,9 @@ static void sys_read(struct intr_frame* f) {
       error_exit(f, -1);
     }
     /* buffer write */
+    lock_acquire(&fdp->lock);
     num_read += file_read(fdp->file, buffer, size);
+    lock_release(&fdp->lock);
   }
   f->eax = num_read;
   return;
@@ -388,7 +383,9 @@ static void sys_write(struct intr_frame* f) {
       error_exit(f, -1);
     }
     /* buffer write */
+    lock_acquire(&fdp->lock);
     num_writen += file_write(fdp->file, buffer, size);
+    lock_release(&fdp->lock);
   }
   f->eax = num_writen;
   return;
@@ -404,7 +401,9 @@ static void sys_seek(struct intr_frame* f) {
   if (!fdp) {
     error_exit(f, -1);
   }
+  lock_acquire(&fdp->lock);
   file_seek(fdp->file, position);
+  lock_release(&fdp->lock);
 }
 
 static void sys_tell(struct intr_frame* f) {
@@ -415,9 +414,9 @@ static void sys_tell(struct intr_frame* f) {
   if (!fdp) {
     error_exit(f, -1);
   }
-  lock_acquire(&fs_lock);
+  lock_acquire(&fdp->lock);
   f->eax = file_tell(fdp->file);
-  lock_release(&fs_lock);
+  lock_release(&fdp->lock);
 }
 
 /* floating point opeartions */
