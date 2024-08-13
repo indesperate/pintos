@@ -74,11 +74,15 @@ void write_back_all_cache() {
 
 static struct fs_cache_entry* evict_entry(void) {
   while (true) {
-    if (!fscb.buf[fscb.clock_head].occupied) {
-      return &fscb.buf[fscb.clock_head];
+    struct fs_cache_entry* entry = &fscb.buf[fscb.clock_head];
+    if (!entry->occupied) {
+      entry->occupied = true;
+      fscb.clock_head++;
+      fscb.clock_head %= MAX_FS_BUFFER_SIZE;
+      return entry;
     }
 
-    if (fscb.buf[fscb.clock_head].accessed) {
+    if (entry->accessed) {
       fscb.buf[fscb.clock_head].accessed = false;
     } else {
       break;
@@ -95,8 +99,6 @@ static struct fs_cache_entry* evict_entry(void) {
   if (entry->dirty) {
     write_back_entry(entry);
   }
-  entry->occupied = false;
-
   return entry;
 }
 
@@ -112,7 +114,6 @@ void cached_block_read_at(block_sector_t sector, void* buffer, size_t size, off_
     e->accessed = true;
   } else {
     e = evict_entry();
-    e->occupied = true;
     e->accessed = true;
     e->dirty = false;
     e->sector = sector;
@@ -139,7 +140,6 @@ void cached_block_write_at(block_sector_t sector, const void* buffer, size_t siz
     e->dirty = true;
   } else {
     e = evict_entry();
-    e->occupied = true;
     e->accessed = false;
     e->dirty = true;
     e->sector = sector;
