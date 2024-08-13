@@ -7,6 +7,7 @@
 void cached_block_write_at(block_sector_t sector, const void* buffer, size_t size, off_t offset);
 void cached_block_read_at(block_sector_t sector, void* buffer, size_t size, off_t offset);
 void cached_block_write(block_sector_t sector, const void* buffer);
+void write_back_all_cache(void);
 void cached_block_read(block_sector_t sector, void* buffer);
 void cache_init(void);
 

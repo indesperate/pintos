@@ -64,6 +64,14 @@ static void write_back_entry(struct fs_cache_entry* entry) {
   block_write(fs_device, entry->sector, entry->data);
 }
 
+void write_back_all_cache() {
+  for (int i = 0; i < MAX_FS_BUFFER_SIZE; i++) {
+    if (fscb.buf[i].dirty) {
+      write_back_entry(&fscb.buf[i]);
+    }
+  }
+}
+
 static struct fs_cache_entry* evict_entry(void) {
   while (true) {
     if (!fscb.buf[fscb.clock_head].occupied) {
